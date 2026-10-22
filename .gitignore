@@ -1,5 +1,12 @@
 # Project data
 data/raw/
+data/processed/*
+!data/processed/.gitkeep
+results/*
+!results/.gitkeep
+!results/*.png
+!results/*.csv
+!results/*.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

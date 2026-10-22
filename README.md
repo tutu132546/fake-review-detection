@@ -59,3 +59,10 @@ pip install -r requirements.txt
 ```
 
 `TODO`：补充数据准备、特征生成、模型训练/评估的具体运行步骤。
+
+# 数据产物说明
+由于数据文件体积较大，Git 仓库中不包含 `data/processed/` 下的文件。请按以下顺序在本地运行脚本生成：
+1. `python src/step0_convert_metadata.py` -> 生成 `YelpChi_reviews.csv`
+2. `python src/step1_build_account_base.py` -> 生成 `clean_accounts.parquet` 和 `scaler_params.json`
+3. `python src/step2_sample_1000.py` -> 生成 `yelpchi_1000_accounts.csv`
+4. `python src/step3_inject_water_army_pro.py` -> 生成 `augmented_accounts_v2.parquet` 和 `injection_log_v2.json`
