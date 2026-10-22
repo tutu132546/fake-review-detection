@@ -43,17 +43,18 @@
 # 五、特征交接说明（B 成员交付，面向建模）
 
 ## 1. 交接文件
-`feature_table.csv`（38,063 行 × 18 列），生成命令：`python src/features/build_feature_table.py`（同时在 `data/processed/` 与项目根目录各存一份）。
+`feature_table.csv`（38,063 行 × 18 列），生成命令：`python src/features/build_feature_table.py`（脚本仅写入 `data/processed/`；项目根目录的共享副本由队伍同步时手动复制，不进 git）。
 该脚本是特征口径的**唯一出口**：burstiness 填充、缺失标记、`_z` 统一重算都在此完成，下游（LOF / iForest / DCFO）一律以本表为准。
 
 ## 2. 列结构与使用纪律
 | 列组 | 列 | 用途 |
 |---|---|---|
-| 标识/评估列 | `user_id`, `account_is_fake`, `is_injected`, `burstiness_missing` | 仅用于评估与实验分组，**严禁进入无监督模型输入** |
+| 标识/评估列 | `user_id`, `account_is_fake`, `is_injected` | 仅用于评估与实验分组，**严禁进入无监督模型输入** |
 | raw 特征列（7） | 7 个原始量纲特征 | 供 DCFO 反事实解释回译为原始单位（如"单日发评降到 3 条以下"） |
 | `_z` 列（7） | 7 个标准化特征 | **无监督模型输入** |
+| 缺失标记列 | `burstiness_missing` | 86.5% 账号的 burstiness 为中位数填充值，此标记区分"真实值/填充值"，**进入模型输入** |
 
-**约定：C 的模型输入 = 7 个 `_z` 列 + `burstiness_missing`，共 8 列。**
+**约定：C 的模型输入 = 7 个 `_z` 列 + `burstiness_missing`，共 8 列**（`burstiness_missing` 属于模型输入，不属评估列，与上表一致）。
 
 ## 3. 特征定义与水军暴露逻辑
 | 特征 | 公式 | 单位/范围 | 暴露逻辑 |
@@ -62,7 +63,7 @@
 | active_days | 首末评论间隔天数 +1 | 天 | 突击型账号活跃期短 |
 | daily_avg_reviews | n_reviews / active_days | 条/天 | 突击刷评推高日均 |
 | max_daily_reviews | 单日最大发评数 | 条 | 定时任务式刷评单日爆发 |
-| burstiness | 相邻评论间隔的变异系数 (std/mean) | 无量纲，≥0 | 集中爆发使间隔规律化，取值偏低；评论数<3 或全部同日发出时无法定义（NaN） |
+| burstiness | 相邻评论间隔的变异系数 (std/mean) | 无量纲，≥0 | 集中爆发会在间隔序列混入大量近 0 间隔，波动增大，取值应**偏高**；评论数<3 或全部同日发出时无法定义（NaN）。注：当前 step3 实现为降低，方向待修（见 §9 注） |
 | rating_deviation | mean(评分 − 商家均分) | 星，[-4,4] | 集中打极端分，偏离商家均分 |
 | extreme_ratio | (1星或5星评论数) / 总数 | [0,1] | 刷评多为极端评分 |
 
@@ -80,7 +81,12 @@ NaN 共 32,918/38,063（86.5%）：其中 32,666 个为评论数 < 3（数据不
 ## 6. 组间比较陷阱（重要）
 注入组 `active_days_z` 组均值偏高（+2.24）是**选池偏差**（注入池只选 n_reviews ≥ 5 的正常号），不是注入效应——active_days 严格未动（dz=0）。
 评估注入效应必须用**配对差值 dz**（同一账号注入前后 `_z` 变化）。修复后实测 dz 基准：
-n_reviews +4.61 ｜ max_daily_reviews +14.09（模板 A/C）｜ burstiness −1.01（A/C）｜ rating_deviation +0.61（B/C）｜ extreme_ratio +0.77 ｜ daily_avg_reviews +0.29 ｜ active_days 0（未动）。
+n_reviews +4.61 ｜ max_daily_reviews +14.09（模板 A/C）｜ burstiness −1.01（A/C，实现产物，物理方向应为正，见 §9 注）｜ rating_deviation +0.61（B/C）｜ extreme_ratio +0.77 ｜ daily_avg_reviews +0.29 ｜ active_days 0（未动）。
+
+**选池偏差对评估的三条纪律**（同样适用于 AUC，不仅是组均值）：
+1. 论文主结论只用原生标签（account_is_fake）结果；注入组仅用于验证解释方法（DCFO）。
+2. 注入号选自 n_reviews≥5 的更活跃正常号，含注入的 AUC 天然偏高，不得作为检测性能证据。
+3. 需要与注入组对比时，对照组必须用同条件（n_reviews≥5）的未注入正常号，而非全体正常号。
 
 ## 7. 特征 ↔ 注入模板对照（DCFO 验证的 ground truth）
 | 模板 | 数量 | 实际修改的特征 |
@@ -111,8 +117,9 @@ n_reviews +4.61 ｜ max_daily_reviews +14.09（模板 A/C）｜ burstiness −1.
 | `results/feature_eda_group_box.png` | 原生正常 / 原生水军 / 注入水军 三组 7 特征 `_z` 箱线图（burstiness 按未填充值绘制，NaN 不参与；箱体隐藏离群点） |
 | `results/feature_eda_template_dz.png` | 注入前后配对 dz 的模板级均值对比（A/B/C 三色柱状图），消除选池偏差 |
 
-可证伪判定 13 项全部 PASS（2026-10-22 实测）：
-- 全模板公共效应：n_reviews dz>0（300/300，均值 +4.61）、daily_avg_reviews dz>0（300/300，均值 +0.29，修复前恒为 0）、extreme_ratio dz>=0（296/300 上升，4 个本就全 5 星）；active_days dz=0（未动）。
-- 模板特异性：A/C 的 max_daily_reviews dz>0（+21.5 / +20.8）且 burstiness dz<0（−1.44 / −1.59）；B/C 的 rating_deviation dz>0（+0.86 / +0.97）。
+可证伪判定 11 项全部 PASS（2026-10-22 实测）+ 1 项描述性观测：
+- 全模板公共效应：n_reviews dz>0（300/300，均值 +4.61）、daily_avg_reviews dz>0（300/300，均值 +0.29，修复前恒为 0）、extreme_ratio dz>=0（296/300 上升，其余 4 个本就全 5 星，数值不变）；active_days dz=0（未动）。
+- 模板特异性：A/C 的 max_daily_reviews dz>0（+21.5 / +20.8）；B/C 的 rating_deviation dz>0（+0.86 / +0.97）。
+- burstiness 方向 [待测]（即第三节与 §3"见 §9 注"所指）：物理上集中爆发会混入近 0 间隔、波动增大，dz 应为正；当前 step3 实现为 dz<0（−1.44 / −1.59），源于"间隔规律化"的错误假设，仅证明"代码按写的改了"。修复方案（构造新增评论时间戳后用 calc_burstiness 重算）已立项，修复前该项降级为描述性观测，不作为方向性 PASS 依据。
 - 未动特征恒为 0：B 的 max_daily_reviews 与 burstiness、A 的 rating_deviation。
 读图提示：图 1 中"原生水军"的 daily_avg_reviews 箱体退化为一条线（约 z=0.6），是因为大量原生假号只有 1 条评论（1/1 天），取值高度集中——这本身是 YelpChi 假号"少评短活"画像的证据。
