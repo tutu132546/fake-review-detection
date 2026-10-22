@@ -37,6 +37,9 @@ def inject_water_army_pro():
         
         # --- 2. 基于新增评论，重新计算复合特征（防破绽的核心） ---
         
+        # (0) 重新计算日均发评数（评论总数增加、活跃期不变，日均必然上升）
+        new_daily_avg = new_n_reviews / new_active_days
+        
         # (1) 重新计算极端评分比例 (假设刷的都是极端评分，如5星)
         old_extreme_count = original['extreme_ratio'] * original['n_reviews']
         new_extreme_count = old_extreme_count + add_n
@@ -47,7 +50,11 @@ def inject_water_army_pro():
         new_dev = np.clip(original['rating_deviation'] + rng.uniform(0.5, 1.5), -4.0, 4.0)
         
         # (3) 重新计算爆发性 (新增大量评论集中在极短时间内，爆发性会降低)
-        new_burst = max(original['burstiness'] * rng.uniform(0.3, 0.6), 0.01)
+        # 先取随机数再分支，保证随机流与修复前完全一致（seed=42 可复现）；
+        # 原账号所有评论同日发出时 burstiness 为 NaN（时间间隔均值为 0），
+        # 新增评论仍集中爆发，物理上同样无法定义间隔，显式保持 NaN 而非隐式传播。
+        _burst_u = rng.uniform(0.3, 0.6)
+        new_burst = np.nan if np.isnan(original['burstiness']) else max(original['burstiness'] * _burst_u, 0.01)
 
         # --- 3. 模板分离（让不同模板修改不同的重点） ---
         if i < 100:
@@ -56,8 +63,10 @@ def inject_water_army_pro():
             df.loc[idx, ['n_reviews', 'max_daily_reviews', 'burstiness', 'extreme_ratio']] = \
                 [new_n_reviews, new_max_daily, new_burst, new_extreme]
             mods = {
+                "n_reviews": {"original": int(original['n_reviews']), "mutated": int(new_n_reviews)},
                 "max_daily_reviews": {"original": int(original['max_daily_reviews']), "mutated": int(new_max_daily)},
-                "burstiness": {"original": round(float(original['burstiness']), 4), "mutated": round(float(new_burst), 4)}
+                "burstiness": {"original": round(float(original['burstiness']), 4), "mutated": round(float(new_burst), 4)},
+                "extreme_ratio": {"original": round(float(original['extreme_ratio']), 4), "mutated": round(float(new_extreme), 4)}
             }
         elif i < 200:
             template = "B_Rating_Polarization"
@@ -65,6 +74,7 @@ def inject_water_army_pro():
             df.loc[idx, ['n_reviews', 'rating_deviation', 'extreme_ratio']] = \
                 [new_n_reviews, new_dev, new_extreme]
             mods = {
+                "n_reviews": {"original": int(original['n_reviews']), "mutated": int(new_n_reviews)},
                 "rating_deviation": {"original": round(float(original['rating_deviation']), 4), "mutated": round(float(new_dev), 4)},
                 "extreme_ratio": {"original": round(float(original['extreme_ratio']), 4), "mutated": round(float(new_extreme), 4)}
             }
@@ -74,15 +84,25 @@ def inject_water_army_pro():
             df.loc[idx, ['n_reviews', 'max_daily_reviews', 'burstiness', 'rating_deviation', 'extreme_ratio']] = \
                 [new_n_reviews, new_max_daily, new_burst, new_dev, new_extreme]
             mods = {
+                "n_reviews": {"original": int(original['n_reviews']), "mutated": int(new_n_reviews)},
+                "max_daily_reviews": {"original": int(original['max_daily_reviews']), "mutated": int(new_max_daily)},
                 "burstiness": {"original": round(float(original['burstiness']), 4), "mutated": round(float(new_burst), 4)},
+                "rating_deviation": {"original": round(float(original['rating_deviation']), 4), "mutated": round(float(new_dev), 4)},
                 "extreme_ratio": {"original": round(float(original['extreme_ratio']), 4), "mutated": round(float(new_extreme), 4)}
             }
+
+        # 公共修正：评论总数增加后，日均发评数同步重算（修复注入后 daily_avg 过期值 bug）
+        df.loc[idx, 'daily_avg_reviews'] = new_daily_avg
+        mods["daily_avg_reviews"] = {
+            "original": round(float(original['daily_avg_reviews']), 4),
+            "mutated": round(float(new_daily_avg), 4)
+        }
 
         df.loc[idx, ['account_is_fake', 'is_injected']] = [1, 1]
         
         # --- 4. 动态同步更新 Z-score ---
         # 注意：只要 n_reviews 变了，所有相关的特征列 Z-score 最好都更新一遍
-        updated_cols = ['n_reviews', 'max_daily_reviews', 'burstiness', 'rating_deviation', 'extreme_ratio']
+        updated_cols = ['n_reviews', 'max_daily_reviews', 'burstiness', 'rating_deviation', 'extreme_ratio', 'daily_avg_reviews']
         for feat_name in updated_cols:
             val = df.loc[idx, feat_name]
             mean_val = scaler[feat_name]["mean"]
