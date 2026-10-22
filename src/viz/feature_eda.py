@@ -28,7 +28,8 @@ from config import PROCESSED_DIR, RESULTS_DIR
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei']
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'PingFang SC',
+                                   'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
 FEATURES = ['n_reviews', 'active_days', 'daily_avg_reviews', 'max_daily_reviews',
@@ -122,22 +123,23 @@ def run_eda():
 
     chk('全模板 n_reviews dz>0（300/300）',
         bool((dz['n_reviews_z'] > 1e-12).all()),
-        f"dz均值 {dz['n_reviews_z'].mean():+.3f}，上升 {int((dz['n_reviews_z'] > 1e-12).sum())}/300")
+        f"dz均值 {dz['n_reviews_z'].mean():+.3f}，上升 {int((dz['n_reviews_z'] > 1e-12).sum())}/{len(dz)}")
     chk('全模板 daily_avg_reviews dz>0（300/300）',
         bool((dz['daily_avg_reviews_z'] > 1e-12).all()),
         f"dz均值 {dz['daily_avg_reviews_z'].mean():+.3f}（修复前恒为 0）")
-    chk('全模板 extreme_ratio dz>=0（296/300 上升）',
-        bool((dz['extreme_ratio_z'] >= -1e-12).all()) and int((dz['extreme_ratio_z'] > 1e-12).sum()) == 296,
-        f"上升 {int((dz['extreme_ratio_z'] > 1e-12).sum())}/300，其余 4 个本就全 5 星")
+    n_ext_up = int((dz['extreme_ratio_z'] > 1e-12).sum())
+    chk('全模板 extreme_ratio dz>=0（其余为原本全 5 星，数值不变）',
+        bool((dz['extreme_ratio_z'] >= -1e-12).all()),
+        f"上升 {n_ext_up}/{len(dz)}，其余 {len(dz) - n_ext_up} 个本就全 5 星")
     chk('全模板 active_days dz=0（未动特征）',
-        bool((dz['active_days_z'].abs() < 1e-12).all()), '300/300 恒为 0')
+        bool((dz['active_days_z'].abs() < 1e-12).all()), f"{len(dz)}/{len(dz)} 恒为 0")
     for t in ['A', 'C']:
         chk(f'模板{t} max_daily_reviews dz>0',
             bool(m.loc[t, 'max_daily_reviews_z'] > 0),
             f"dz均值 {m.loc[t, 'max_daily_reviews_z']:+.3f}")
-        chk(f'模板{t} burstiness dz<0',
-            bool(m.loc[t, 'burstiness_z'] < 0),
-            f"dz均值 {m.loc[t, 'burstiness_z']:+.3f}")
+        logging.info(f"   [描述] 模板{t} burstiness dz均值 {m.loc[t, 'burstiness_z']:+.3f} | "
+                     f"物理方向应为 dz>0（集中爆发混入近 0 间隔，波动增大）；当前 step3 实现为降低，"
+                     f"方向待修（见 data_dictionary §9 注），不作为方向性判定")
     for t in ['B', 'C']:
         chk(f'模板{t} rating_deviation dz>0',
             bool(m.loc[t, 'rating_deviation_z'] > 0),
