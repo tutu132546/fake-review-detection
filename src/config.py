@@ -11,3 +11,4 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 # 文件路径
 MAT_PATH = RAW_DIR / "YelpChi.mat"
 RAW_METADATA_PATH = RAW_DIR / "metadata.txt"
+RAW_CSV_PATH = RAW_DIR / "YelpChi_reviews.csv"
