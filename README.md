@@ -66,3 +66,4 @@ pip install -r requirements.txt
 2. `python src/step1_build_account_base.py` -> 生成 `clean_accounts.parquet` 和 `scaler_params.json`
 3. `python src/step2_sample_1000.py` -> 生成 `yelpchi_1000_accounts.csv`
 4. `python src/step3_inject_water_army_pro.py` -> 生成 `augmented_accounts_v2.parquet` 和 `injection_log_v2.json`
+5. `python src/features/build_feature_table.py` -> 生成 `feature_table.csv`（B 交付的建模交接表：burstiness 中位数填充 + 缺失标记列 + `_z` 统一重算，详见 `data_dictionary.md` 第五节）
