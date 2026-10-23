@@ -78,5 +78,8 @@ PR #4 审查后的 [分人群分析](results/c_cohort_analysis.md) 对照全部�
 ```bash
 python src/models/detection_diagnostics.py --input data/processed/feature_table.csv --neighbors 20 50 100 600 --report results/c_detection_diagnostics.md
 python src/models/cohort_analysis.py --input data/processed/feature_table.csv
+python src/models/cohort_uncertainty.py --input data/processed/feature_table.csv
 python -m unittest discover -s tests -p "test_detection_diagnostics.py"
 ```
+
+PR #5 的 [审查补充报告](results/c_cohort_uncertainty.md) 提供 Lift@50、固定分数下的 AUC bootstrap 区间、配对模型差值及标签/Top-50 并列画像。全部单元测试可用 `python -m unittest discover -s tests -v` 运行，不需要真实数据；完整实验仍需取得交接特征表。

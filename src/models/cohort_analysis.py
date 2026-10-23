@@ -95,7 +95,7 @@ def main(args):
         f"Python {reports[0]['python']}; "+', '.join(f'{k}={v}' for k,v in reports[0]['versions'].items()),
         '运行：python src/models/cohort_analysis.py --input data/processed/feature_table.csv',
         '明细与完整JSON保存在忽略目录data/processed/c_cohorts，不提交账号ID。原PR #4报告保持不变。',
-        '同分按账号ID升序；P@50并列范围也已报告。尚未做不确定性区间或独立样本验证，不能声称统计显著。',
+        '同分按账号ID升序；P@50并列范围也已报告。固定分数的条件bootstrap区间、lift及更新画像见 [PR #5补充报告](c_cohort_uncertainty.md)，由cohort_uncertainty.py另行生成；尚未做独立样本验证。',
         'AUC<0.5记录为该配置下异常分数与代理标签整体排序偏反的负面发现；不自动将异常分数取负以提高成绩。',
         '人群内重新拟合改变LOF参照邻域；不能把任一人群的结果套用为全体账号检测性能。']
     args.report.parent.mkdir(parents=True,exist_ok=True)
