@@ -65,6 +65,31 @@ class DiagnosticTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'binary'):
                 diag.load_features(path)
 
+    def test_three_reviews_does_not_imply_observed_burstiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'f.csv'
+            frame = self.make_frame()
+            frame['n_reviews'] = [3, 4, 5]
+            frame['is_injected'] = [0, 1, 0]
+            frame['burstiness_missing'] = [1, 0, 0]
+            frame.to_csv(path,index=False)
+            ge3, X = diag.load_features(path,'native_ge3')
+            observed, Xobs = diag.load_features(path,'native_ge3_observed')
+        self.assertEqual(ge3.user_id.tolist(),[20,30])
+        self.assertEqual(observed.user_id.tolist(),[20])
+        self.assertEqual(Xobs.shape,(1,8))
+        self.assertEqual(Xobs[0,-1],0)
+        self.assertEqual(Xobs[0,0],2.)
+
+    def test_cohort_count_must_be_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'f.csv'
+            frame=self.make_frame()
+            frame['n_reviews']=[1,2.5,3]
+            frame.to_csv(path,index=False)
+            with self.assertRaisesRegex(ValueError,'integer'):
+                diag.load_features(path,'native_ge3')
+
 
 if __name__ == '__main__':
     unittest.main()

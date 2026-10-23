@@ -25,6 +25,7 @@ RAW_FEATURES = ["n_reviews", "active_days", "daily_avg_reviews", "max_daily_revi
                 "burstiness", "rating_deviation", "extreme_ratio"]
 FEATURES = [f"{f}_z" for f in RAW_FEATURES] + ["burstiness_missing"]
 LABELS = ["user_id", "account_is_fake", "is_injected"]
+POPULATIONS = ['native', 'native_ge3', 'native_ge3_observed', 'augmented']
 
 
 def load_features(path, population="native"):
@@ -40,7 +41,16 @@ def load_features(path, population="native"):
     X = frame[FEATURES].to_numpy(dtype=float)
     if not np.isfinite(X).all():
         raise ValueError("Model features contain nonfinite values")
-    if population == "native":
+    if population in ['native_ge3', 'native_ge3_observed']:
+        if 'n_reviews' not in frame:
+            raise ValueError('Cohort selection requires raw n_reviews')
+        counts = pd.to_numeric(frame.n_reviews, errors='coerce').to_numpy(dtype=float)
+        if not np.isfinite(counts).all() or (counts < 1).any() or (counts != np.floor(counts)).any():
+            raise ValueError('n_reviews must contain positive integer counts')
+        frame = frame.loc[frame.is_injected.eq(0) & (counts >= 3)].copy()
+        if population == 'native_ge3_observed':
+            frame = frame.loc[frame.burstiness_missing.eq(0)].copy()
+    elif population == "native":
         frame = frame.loc[frame.is_injected.eq(0)].copy()
     elif population != "augmented":
         raise ValueError("Unknown population")
@@ -163,7 +173,7 @@ def run(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', type=Path, required=True)
-    parser.add_argument('--population', choices=['native','augmented'], default='native')
+    parser.add_argument('--population', choices=POPULATIONS, default='native')
     parser.add_argument('--neighbors', type=int, nargs='+', default=[20,50,100,600])
     parser.add_argument('--output-dir', type=Path, default=Path('data/processed/c_diagnostics'))
     parser.add_argument('--report', type=Path)
