@@ -73,7 +73,10 @@ pip install -r requirements.txt
 接入 B 交付特征表后的运行方式、评价范围和 DCFO 验证状态见 [检测说明](docs/c_detection.md)。
 当前 [诊断结果](results/c_detection_diagnostics.md) 记录了重复特征对 LOF 的影响；这些是初步实验，不是最终检测或规避攻击结果。
 
+PR #4 审查后的 [分人群分析](results/c_cohort_analysis.md) 对照全部未注入账号、评论数至少 3 条及爆发性非缺失的人群。各人群分别拟合，不能将指标差异称为全体账号上的性能提升。此前 DCFO 玩具验证仅在本地完成，本仓库暂不可复现，详见检测说明。
+
 ```bash
 python src/models/detection_diagnostics.py --input data/processed/feature_table.csv --neighbors 20 50 100 600 --report results/c_detection_diagnostics.md
+python src/models/cohort_analysis.py --input data/processed/feature_table.csv
 python -m unittest discover -s tests -p "test_detection_diagnostics.py"
 ```
