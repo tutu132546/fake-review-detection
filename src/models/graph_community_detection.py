@@ -19,7 +19,7 @@ USER_COL = 'user_id'
 ITEM_COL = 'product_id'  
 
 # 算法超参数
-MAX_ITEM_DEGREE = 50  # 超级节点阈值：评论数超过50的商品视为热门商品，从图中剔除
+MAX_ITEM_DEGREE = 500  # 放宽阈值，只剔除极少数超级爆款
 MIN_WEIGHT = 2        # 边权重阈值：两个用户至少共同评论过2个商品才建立连接
 GROUP_DIVISOR = 20.0  # 分数归一化分母：团伙人数达到20人即得满分1.0
 # ==============================================
@@ -43,6 +43,9 @@ def run_graph_analysis():
     print(f"发现 {len(super_nodes)} 个超级热门商品，已将其移除。")
     B.remove_nodes_from(super_nodes)
 
+    # 打印剩下的商品节点数，证明图没被删空
+    print(f"过滤后剩余商品节点数: {len([n for n in B.nodes if n in items])}")
+
     # 4. 二部图投影：将 用户-商品 图转换为 用户-用户 图
     # 筛选出过滤超级节点后，仍在图中保留的用户
     users = [u for u in df[USER_COL].unique() if B.has_node(u)]
@@ -61,7 +64,7 @@ def run_graph_analysis():
     if G_user.number_of_edges() > 0:
         print("正在运行 Louvain 算法找团伙...")
         # best_partition 会返回一个字典 {user_id: group_id}
-        partition = community_louvain.best_partition(G_user)
+        partition = community_louvain.best_partition(G_user, random_state=42)
         
         # 将结果转为 DataFrame 便于后续处理
         result_df = pd.DataFrame(list(partition.items()), columns=['user_id', 'group_id'])

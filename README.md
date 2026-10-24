@@ -83,3 +83,24 @@ python -m unittest discover -s tests -p "test_detection_diagnostics.py"
 ```
 
 PR #5 的 [审查补充报告](results/c_cohort_uncertainty.md) 提供 Lift@50、固定分数下的 AUC bootstrap 区间、配对模型差值及标签/Top-50 并列画像。全部单元测试可用 `python -m unittest discover -s tests -v` 运行，不需要真实数据；完整实验仍需取得交接特征表。
+
+## D：用户-商品二部图与社区发现（图算法）
+
+本模块通过构建用户-商品二部图并投影为用户关系网，使用 Louvain 算法进行社区发现（团伙检测），输出账号图可疑分数与团伙网络可视化图。
+
+### 运行说明
+
+```bash
+# 1. 运行二部图构建与社区发现，生成全量账号分数表
+python src/models/graph_community_detection.py
+
+# 2. 运行可视化脚本，自动提取人数最多的团伙并绘图
+python src/viz/plot_group_network.py
+```
+
+### 交付产物
+- `results/graph_scores.csv`：包含所有账号的图可疑分数，供后续融合评估。
+  - `user_id`：账号唯一标识。
+  - `group_id`：所属团伙编号。
+  - `graph_score`：图可疑分（计算方式为：团伙人数 / 20，封顶为 1.0。即团伙人数达到 20 人即得满分）。
+- `results/graph_group_network.png`：高可疑候选团伙的网络结构可视化图。
