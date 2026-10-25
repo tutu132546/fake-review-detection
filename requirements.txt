@@ -11,3 +11,4 @@ beautifulsoup4
 tqdm
 pyarrow
 python-louvain
+tabulate

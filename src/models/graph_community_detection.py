@@ -21,7 +21,7 @@ ITEM_COL = 'product_id'
 # 算法超参数
 MAX_ITEM_DEGREE = 500  # 放宽阈值，只剔除极少数超级爆款
 MIN_WEIGHT = 2        # 边权重阈值：两个用户至少共同评论过2个商品才建立连接
-GROUP_DIVISOR = 20.0  # 分数归一化分母：团伙人数达到20人即得满分1.0
+# GROUP_DIVISOR = 20.0  # 分数归一化分母：团伙人数达到20人即得满分1.0
 # ==============================================
 
 def run_graph_analysis():
@@ -72,15 +72,30 @@ def run_graph_analysis():
         # 统计每个团伙的规模（人数）
         group_sizes = result_df['group_id'].value_counts().to_dict()
         
-        # 计算图可疑分：团伙人数越多，单个人的可疑分越高（封顶为1.0）
-        result_df['graph_score'] = result_df['group_id'].apply(lambda x: min(1.0, group_sizes[x] / GROUP_DIVISOR))
+        # 计算账号级的连续指标（节点度数 / 团伙总人数）
+        # 获取每个账号在全局图中的度数（连接了多少人）
+        user_degrees = dict(G_user.degree())
+        # 映射到表格中
+        result_df['degree'] = result_df['user_id'].map(user_degrees).fillna(0)
+        result_df['group_size'] = result_df['group_id'].map(group_sizes).fillna(1)
         
+        # 计算分数：你在团伙里认识的人越多，分数越高。
+        # 核心头目（度数最大）接近 1.0，边缘小弟（只有1条边）分数极低，单人团伙为 0。
+        result_df['graph_score'] = result_df['degree'] / result_df['group_size']
+
+        # 把所有分数缩放到 0~1 之间，解决大于 1 的问题！
+        result_df['graph_score'] = result_df['graph_score'] / result_df['graph_score'].max()
+        
+        # 清理不需要的中间列
+        result_df = result_df.drop(columns=['degree', 'group_size'])
+
         # 按分数降序排列，最可疑的排在最前
         result_df = result_df.sort_values(by='graph_score', ascending=False)
+
         
         # 7. 保存交付结果
-        os.makedirs('results', exist_ok=True)
-        save_path = 'results/graph_scores.csv' 
+        os.makedirs('data/processed', exist_ok=True)
+        save_path = 'data/processed/graph_scores.csv' 
         result_df.to_csv(save_path, index=False)
         
         print(f"\n✅ 团伙划分完毕！共发现 {len(group_sizes)} 个团伙。")

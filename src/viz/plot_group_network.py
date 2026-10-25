@@ -15,7 +15,7 @@ plt.rcParams['axes.unicode_minus'] = False    # 正常显示负号
 
 # ================= 配置参数区 =================
 FILE_PATH = 'data/raw/YelpChi_reviews.csv' 
-SCORES_PATH = 'results/graph_scores.csv'
+SCORES_PATH = 'data/processed/graph_scores.csv'
 MIN_EDGE_WEIGHT = 2    # 绘图时仅保留共同评论数>=2的强关系边
 
 # 全局读取一次数据
@@ -52,62 +52,80 @@ def draw_target_group():
         core_node = max(dict(G_final.degree()).items(), key=lambda x: x[1])[0]
         neighbors = list(G_final.neighbors(core_node))
         
-        # 🌟 新增逻辑：按边权重排序，只取前 30 个最紧密的邻居
+        # 1. 提取 Top 30 紧密邻居
         neighbors_sorted = sorted(neighbors, key=lambda x: G_final[core_node][x]['weight'], reverse=True)
         top_neighbors = neighbors_sorted[:30] 
+        nodes_top = [core_node] + top_neighbors
+        G_top = G_final.subgraph(nodes_top).copy()
         
-        nodes_to_keep = [core_node] + top_neighbors
-        G_final = G_final.subgraph(nodes_to_keep).copy()
-        # 更新一下标题提示（可选）
-        print(f"为了美观展示，只提取了核心节点及其 Top {len(top_neighbors)} 个最紧密邻居。")
+        # 2. 公平对照组：随机选一个“非核心”节点，取它权重最高的 Top 30 邻居
+        import random
+        random.seed(42)
+        all_nodes = list(G_final.nodes)
+        # 排除掉核心节点
+        non_core_nodes = [n for n in all_nodes if n != core_node]
         
-    # 重新计算位置
-    pos = nx.spring_layout(G_final, k=1.0, seed=42) # 把 k 调大一点，让点散开
+        if len(non_core_nodes) > 0:
+            random_node = random.choice(non_core_nodes)
+            random_neighbors = list(G_final.neighbors(random_node))
+            # 按权重给邻居排序
+            random_neighbors_sorted = sorted(random_neighbors, key=lambda x: G_final[random_node][x]['weight'], reverse=True)
+            top_random_neighbors = random_neighbors_sorted[:30]
+            
+            nodes_random = [random_node] + top_random_neighbors
+            G_random = G_final.subgraph(nodes_random).copy()
+        else:
+            G_random = G_final.copy() # 兜底
+        
+        # 我们把原来的 G_final 替换成 G_top 画第一张图
+        G_final = G_top
 
-    # 4. 网络图可视化绘制
+    # ---------------- 图1：绘制 Top 30 核心邻居网络 ----------------
+    pos_top = nx.spring_layout(G_top, k=1.0, seed=42)
     plt.figure(figsize=(10, 8))
-    plt.title(f"高可疑候选团伙 {TARGET_GROUP_ID} 网络结构 (团伙总人数: {len(target_users)})", fontsize=16, fontweight='bold')
+    plt.title(f"高可疑候选团伙 (核心与Top30邻居) 网络结构", fontsize=16, fontweight='bold')
 
-    # 根据节点的连接数（度数）动态分配大小和颜色
-    degrees = dict(G_final.degree())
-    max_degree = max(degrees.values()) # 找到连接数最多的那个节点（也就是中心头目）
+    degrees = dict(G_top.degree())
+    max_degree = max(degrees.values()) 
     
-    # 计算大小：中心节点 1200，边缘节点 300
     node_sizes = [1200 if deg == max_degree else 300 for deg in degrees.values()]
-    # 计算颜色：中心节点是红色（red），边缘节点是浅蓝色（#4da6ff）
     node_colors = ['red' if deg == max_degree else '#4da6ff' for deg in degrees.values()]
 
-    # 绘制节点（使用上面算好的大小和颜色）
-    nx.draw_networkx_nodes(G_final, pos, node_color=node_colors, node_size=node_sizes, alpha=0.8)
-    # 绘制边（灰色线条）
-    nx.draw_networkx_edges(G_final, pos, edge_color='gray', alpha=0.5)
-    # 绘制节点标签（账号ID）
-    nx.draw_networkx_labels(G_final, pos, font_size=8)
+    nx.draw_networkx_nodes(G_top, pos_top, node_color=node_colors, node_size=node_sizes, alpha=0.8)
+    nx.draw_networkx_edges(G_top, pos_top, edge_color='gray', alpha=0.5)
+    nx.draw_networkx_labels(G_top, pos_top, font_size=8)
 
-    # 隐藏坐标轴边框
     plt.axis('off')
-
-    # 添加图例 (Legend)
-    # 创建中心红点的图例
-    center_node = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
-                              markersize=12, label='核心节点 (连接数最多)')  # 改这里
-    # 创建边缘蓝点的图例
-    regular_node = mlines.Line2D([], [], color='#4da6ff', marker='o', linestyle='None',
-                                markersize=8, label='边缘节点')  # 改这里
-    # 创建连线的图例（把 >= 换成普通符号，防乱码）
-    edge_line = mlines.Line2D([], [], color='gray', linewidth=1.5,
-                             label='强关联 (共同评论 >= 2 个商品)') 
     
-    # 图例放回右下角，稍微留一点边距
-    plt.legend(handles=[center_node, regular_node, edge_line],
-           loc='lower right',
-           bbox_to_anchor=(1.1, 0.0), # 把锚点往右移出画布一点点
-           fontsize=12)
+    # 图例
+    center_node = mlines.Line2D([], [], color='red', marker='o', linestyle='None', markersize=12, label='核心节点')
+    regular_node = mlines.Line2D([], [], color='#4da6ff', marker='o', linestyle='None', markersize=8, label='边缘节点')
+    edge_line = mlines.Line2D([], [], color='gray', linewidth=1.5, label='强关联 (>= 2 个商品)') 
+    
+    plt.legend(handles=[center_node, regular_node, edge_line], loc='lower right', bbox_to_anchor=(1.1, 0.0), fontsize=12)
 
-    # 6. 保存高清图片至 results 文件夹
-    save_img_path = 'results/graph_group_network.png'
-    plt.savefig(save_img_path, dpi=300, bbox_inches='tight')
-    print(f"✅ 团伙网络图已成功保存至: {save_img_path}")
+    save_img_path_top = 'results/graph_group_network_top30.png'
+    plt.savefig(save_img_path_top, dpi=300, bbox_inches='tight')
+    print(f"✅ Top30网络图已保存至: {save_img_path_top}")
+    plt.close() # 画完必须关掉，不然两张图会重叠
+
+    # ---------------- 图2：绘制随机对照组网络 ----------------
+    pos_rand = nx.spring_layout(G_random, k=1.0, seed=42)
+    plt.figure(figsize=(10, 8))
+    plt.title(f"随机对照 (非核心节点及其Top30邻居) 网络结构", fontsize=16, fontweight='bold')
+
+    # 随机图没有明显的中心节点，所以全是蓝色
+    nx.draw_networkx_nodes(G_random, pos_rand, node_color='#4da6ff', node_size=300, alpha=0.8)
+    nx.draw_networkx_edges(G_random, pos_rand, edge_color='gray', alpha=0.5)
+    nx.draw_networkx_labels(G_random, pos_rand, font_size=8)
+
+    plt.axis('off')
+    plt.legend(handles=[regular_node, edge_line], loc='lower right', bbox_to_anchor=(1.1, 0.0), fontsize=12)
+
+    save_img_path_rand = 'results/graph_group_network_random.png'
+    plt.savefig(save_img_path_rand, dpi=300, bbox_inches='tight')
+    print(f"✅ 随机对照组网络图已保存至: {save_img_path_rand}")
+    plt.close()
 
 if __name__ == "__main__":
     draw_target_group()
