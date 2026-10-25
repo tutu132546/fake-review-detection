@@ -58,12 +58,24 @@ def draw_target_group():
         nodes_top = [core_node] + top_neighbors
         G_top = G_final.subgraph(nodes_top).copy()
         
-        # 2. 随机抽取 31 个节点（对照组）
+        # 2. 公平对照组：随机选一个“非核心”节点，取它权重最高的 Top 30 邻居
         import random
         random.seed(42)
         all_nodes = list(G_final.nodes)
-        random_nodes = random.sample(all_nodes, min(31, len(all_nodes)))
-        G_random = G_final.subgraph(random_nodes).copy()
+        # 排除掉核心节点
+        non_core_nodes = [n for n in all_nodes if n != core_node]
+        
+        if len(non_core_nodes) > 0:
+            random_node = random.choice(non_core_nodes)
+            random_neighbors = list(G_final.neighbors(random_node))
+            # 按权重给邻居排序
+            random_neighbors_sorted = sorted(random_neighbors, key=lambda x: G_final[random_node][x]['weight'], reverse=True)
+            top_random_neighbors = random_neighbors_sorted[:30]
+            
+            nodes_random = [random_node] + top_random_neighbors
+            G_random = G_final.subgraph(nodes_random).copy()
+        else:
+            G_random = G_final.copy() # 兜底
         
         # 我们把原来的 G_final 替换成 G_top 画第一张图
         G_final = G_top
@@ -100,7 +112,7 @@ def draw_target_group():
     # ---------------- 图2：绘制随机对照组网络 ----------------
     pos_rand = nx.spring_layout(G_random, k=1.0, seed=42)
     plt.figure(figsize=(10, 8))
-    plt.title(f"高可疑候选团伙 (随机抽取31个节点) 网络结构", fontsize=16, fontweight='bold')
+    plt.title(f"随机对照 (非核心节点及其Top30邻居) 网络结构", fontsize=16, fontweight='bold')
 
     # 随机图没有明显的中心节点，所以全是蓝色
     nx.draw_networkx_nodes(G_random, pos_rand, node_color='#4da6ff', node_size=300, alpha=0.8)

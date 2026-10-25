@@ -108,7 +108,9 @@ python src/models/evaluate_auc.py
 - `data/processed/graph_scores.csv`：包含所有账号的图可疑分数，供后续融合评估。
   - `user_id`：账号唯一标识。
   - `group_id`：所属团伙编号。
-  - `graph_score`：图可疑分（计算方式为：节点在团伙内的度数 / 团伙总人数，并进行全局 0~1 归一化。核心节点接近 1.0，边缘节点极低，单人团伙为 0）。
+  - `graph_score`：图可疑分（计算方式为：节点在团伙内的度数 / 团伙总人数，并进行全局 0~1 归一化）。实测核对发现，最高分（1.0）确实出现在人数较多且极度抱团的大团伙核心（如 392 人团伙中的核心节点），边缘节点分数极低，单人团伙为 0。
 - `results/graph_group_network_top30.png`：高可疑候选团伙（核心与Top30邻居）网络结构图。
 - `results/graph_group_network_random.png`：同规模随机抽取节点网络图（作为对照组）。
 - `results/sensitivity_analysis.md`：图算法阈值敏感性分析结果表。
+
+**关于阈值 500 的说明**：根据敏感性分析结果，阈值设为 500 时，最大连通子图人数（2841人）占有边账号总数（约2880人）的约99%，即约 99% 的有边账号连成了一整块。因此，阈值 500 下的“团伙”实际上是 Louvain 算法对这块巨大连通网进行切割的结果，非自然形成的独立团伙。详见 `results/sensitivity_analysis.md`。
