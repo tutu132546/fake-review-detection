@@ -123,3 +123,11 @@ n_reviews +4.61 ｜ max_daily_reviews +14.09（模板 A/C）｜ burstiness −1.
 - burstiness 方向 [待测]（即第三节与 §3"见 §9 注"所指）：物理上集中爆发会混入近 0 间隔、波动增大，dz 应为正；当前 step3 实现为 dz<0（−1.44 / −1.59），源于"间隔规律化"的错误假设，仅证明"代码按写的改了"。修复方案（构造新增评论时间戳后用 calc_burstiness 重算）已立项，修复前该项降级为描述性观测，不作为方向性 PASS 依据。
 - 未动特征恒为 0：B 的 max_daily_reviews 与 burstiness、A 的 rating_deviation。
 读图提示：图 1 中"原生水军"的 daily_avg_reviews 箱体退化为一条线（约 z=0.6），是因为大量原生假号只有 1 条评论（1/1 天），取值高度集中——这本身是 YelpChi 假号"少评短活"画像的证据。
+
+## 10. D 模块产出：图算法社区发现
+*   **`data/processed/graph_scores.csv`**：由 `src/models/graph_community_detection.py` 生成，包含图算法对全量账号的社区划分与打分。
+    *   `user_id`: 账号唯一标识。
+    *   `group_id`: Louvain 图算法划分的社区/团伙 ID。
+    *   `graph_score`: 账号级图可疑分数，范围 `[0, 1]`。
+        *   **计算口径**：`(该账号在团伙内的度数 / 团伙总人数)`，随后进行全局最大值归一化。
+        *   **解读**：分数越高，说明该账号在团伙内的连接越密集，越可能是“核心节点”。单人孤立团伙分数为 0。

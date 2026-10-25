@@ -94,13 +94,21 @@ PR #5 的 [审查补充报告](results/c_cohort_uncertainty.md) 提供 Lift@50�
 # 1. 运行二部图构建与社区发现，生成全量账号分数表
 python src/models/graph_community_detection.py
 
-# 2. 运行可视化脚本，自动提取人数最多的团伙并绘图
+# 2. 运行可视化脚本（同时输出 Top30 核心网络和随机对照组网络）
 python src/viz/plot_group_network.py
+
+# 3. 运行阈值敏感性分析（生成 results/sensitivity_analysis.md）
+python src/models/sensitivity_analysis.py
+
+# 4. 运行 AUC 验证脚本（输出与真实标签的对比结果）
+python src/models/evaluate_auc.py
 ```
 
 ### 交付产物
-- `results/graph_scores.csv`：包含所有账号的图可疑分数，供后续融合评估。
+- `data/processed/graph_scores.csv`：包含所有账号的图可疑分数，供后续融合评估。
   - `user_id`：账号唯一标识。
   - `group_id`：所属团伙编号。
-  - `graph_score`：图可疑分（计算方式为：团伙人数 / 20，封顶为 1.0。即团伙人数达到 20 人即得满分）。
-- `results/graph_group_network.png`：高可疑候选团伙的网络结构可视化图。
+  - `graph_score`：图可疑分（计算方式为：节点在团伙内的度数 / 团伙总人数，并进行全局 0~1 归一化。核心节点接近 1.0，边缘节点极低，单人团伙为 0）。
+- `results/graph_group_network_top30.png`：高可疑候选团伙（核心与Top30邻居）网络结构图。
+- `results/graph_group_network_random.png`：同规模随机抽取节点网络图（作为对照组）。
+- `results/sensitivity_analysis.md`：图算法阈值敏感性分析结果表。
