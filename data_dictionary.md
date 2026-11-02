@@ -155,3 +155,104 @@ v3.0 实测（2026-10-24）：9 项 PASS + 3 项由硬判据降级为观测项�
     *   `graph_score`: 账号级图可疑分数，范围 `[0, 1]`。
         *   **计算口径**：`(该账号在团伙内的度数 / 团伙总人数)`，随后进行全局最大值归一化。
         *   **解读**：分数越高，说明该账号在团伙内的连接越密集，越可能是“核心节点”。经实测核对前 10 名高分账号，最高分（1.0）出自 392 人的大团伙核心，印证了公式在极度抱团的大团伙中依然能准确识别出核心。单人孤立团伙分数为 0。
+
+# 十一、多数据集统一格式（数据组交付，2026-11）
+
+四个公开数据集（YelpChi / YelpNYC / YelpZip / FraudSquad-Amazon）加一份自建注入集，
+统一整理成**评论级**同一套 schema。生成命令、来源核验与使用条款见
+[`docs/data/provenance.md`](docs/data/provenance.md)，实测质量见
+[`results/data_quality_report.md`](results/data_quality_report.md)。
+
+## 1. 为什么是评论级
+
+账号级表（第三节）只能表达"这个号可疑"，而四个数据集的账号口径互不相同
+（Yelp 按"发过被过滤评论"、FraudSquad 按"这条评论是否由模型生成"、
+我们的注入集按"是否被注入过"）。要在同一张表上做**公平对比**，唯一稳定的公共粒度是
+**一条评论**：它天然带 user / item / rating / date / label / text，账号级特征由下游自行聚合。
+
+## 2. 交付文件
+
+| 文件 | 行数 | 说明 |
+|---|---|---|
+| `data/processed/unified/yelpchi.parquet` | 67,395 | YelpChi，**无文本** |
+| `data/processed/unified/yelpzip.parquet` | 608,458 | YelpZip，带文本 |
+| `data/processed/unified/fraudsquad_amazon.parquet` | 94,242 | 真实 86,758 + LLM 生成 7,484 |
+| `data/processed/unified/yelpchi_injected.parquet` | 70,186 | YelpChi 67,395 + 注入 2,791 |
+| `data/processed/unified/all_reviews.parquet` | 840,281 | 以上合并（用 `dataset` 列区分） |
+| `data/processed/unified/manifest.json` | — | 构建时间、原始文件 sha256、统计、官方规模对照 |
+| `results/data_quality_report.md` | — | 人读的质量报告（含"使用陷阱"） |
+
+YelpNYC 未取得（官方仅邮件申请），故无对应文件；补齐后重跑 `build` 会自动生成。
+
+## 3. 字段定义
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `dataset` | str | 数据集标识：`yelpchi` / `yelpzip` / `fraudsquad_amazon` / `yelpchi_injected` |
+| `review_id` | str | 数据集内唯一评论 ID，形如 `yelpzip-000123456`（按原始行序，稳定可复现） |
+| `global_user_id` | str | `{dataset}:{user_id}`，**跨数据集拼接时用这一列**，避免不同数据集用户 ID 撞号 |
+| `user_id` | str | 数据集原始用户 ID（统一转字符串，防止 19 位大整数丢精度） |
+| `item_id` | str | 数据集原始商品/商户 ID |
+| `rating` | float32 | 1~5 星；缺失为 NaN（**不填 0，不填均值**） |
+| `date` | datetime64 | 评论时间，**naive**（不带时区，按原始数据的本地时间存） |
+| `label` | int8 | **1 = 虚假评论，0 = 真实评论**（全数据集统一方向，见 §4） |
+| `label_source` | str | 标签怎么来的：`yelp_filter` / `real_baseline` / `llm_generated` / `human_generated` / `injected` |
+| `is_injected` | int8 | 1 = 我们 step3 人工注入的评论 |
+| `text_available` | int8 | 1 = 该数据集原本就带文本；0 = 无文本字段（当前为 YelpChi 两版） |
+| `text` | str | 评论文本；无文本时为空串（**不是 NaN**），判断有无请看 `text_available` |
+
+`label_source` 是这次新增的关键字段：它让"这个标签是平台给的、模型生成的、还是我们造出来的"
+在数据层面可区分，对比表里说明监督信号强度时直接引用它即可。
+
+## 4. 标签方向的统一规则（**最容易出错的地方**）
+
+| 原始数据 | 原始编码 | 统一后 `label` |
+|---|---|---|
+| YelpChi / YelpZip | `1` = 推荐（真实）、`-1` = 过滤（虚假） | `-1 → 1`，`1 → 0` |
+| 部分再加工版本 | `1` = 真实、`0` = 虚假 | `0 → 1`，`1 → 0` |
+| FraudSquad 真实基线 | 无标签列 | 全部 `0`，`label_source=real_baseline` |
+| FraudSquad 生成集 | 文件里 `label` 全为 1 | 全部 `1`，`label_source=llm_generated` |
+| 我们注入的评论 | `injection_log_v2.json` 的 `events_added` | 全部 `1`，`label_source=injected` |
+
+代码里的 `label_from_yelp()` 用**显式白名单**判定：遇到 `1 / -1 / 0` 之外的陌生取值直接抛
+`SchemaError`，不会把未知标签悄悄当成真实样本。历史上"标签方向反了"是最常见也最难发现的 bug，
+这里宁可让程序停下来。
+
+## 5. 数据集之间的口径差异（写论文时必须说明）
+
+| 维度 | YelpChi | YelpZip | FraudSquad-Amazon | 注入集 |
+|---|---|---|---|---|
+| 对象 | 芝加哥酒店/餐厅 | 纽约州及邻近州餐厅 | Amazon 商品（5 个类目） | 芝加哥酒店/餐厅 |
+| 假评比例 | 13.23% | 13.22% | 7.94% | 16.68% |
+| 标签来源 | 平台过滤器（near ground truth） | 同左 | 构造即真值 | 注入脚本 |
+| 时间跨度 | 2004-10 ~ 2012-10 | 2004-10 ~ 2015-01 | 2021-12 ~ 2023-01 | 2004-10 ~ 2012-10 |
+| 文本 | 无 | 有 | 有 | 无 |
+
+**推论**：跨数据集的绝对 AUC 不可直接横向比较（假评比例、领域、时间全不同），
+只能在同一数据集内比较不同方法。对比表应写出"同一数据集、同一划分、同一指标"。
+
+## 6. 三条使用纪律（血泪版）
+
+1. **不要把 `FraudSquad` 的账号当水军标签**。生成评论复用了真实账号——2,191 个发过生成评论的用户
+   **100%** 在真实基线里也有真实评论。用"发过生成评论"当账号级标签，会把正常用户判成水军。
+2. **不要用空文本跑文本模型**。YelpChi 与注入集 `text_available=0`，拿空串喂 TF-IDF 得到的分数没有意义，
+   更不能拿去和别的数据集比。
+3. **不要忽略"评分捷径"**。FraudSquad 的生成评论 100% 是 5 星，而真实评论 5 星占 69.6%。
+   任何吃评分的模型都会虚高，必须把"仅用评分"作为对照基线一起报。
+
+## 7. 读取方式
+
+```python
+import sys; sys.path.insert(0, "src")
+from data import load_dataset, load_all, list_datasets, iter_reviews
+
+list_datasets()                                  # 已构建的数据集 + 规模 + 状态
+df  = load_dataset("yelpzip")                    # 单集，按 date 升序
+df  = load_dataset("yelpzip", with_text=False)   # 不要文本（省几个 GB 内存）
+sub = load_all(["yelpchi", "yelpchi_injected"]) # 多集合并
+for batch in iter_reviews("yelpzip", batch_size=50_000):  # 60 万行级别流式处理
+    ...
+```
+
+配套校验：`python src/build_unified_data.py verify` 会比对 parquet 与 `manifest.json` 的
+sha256 与行数，防止"本地改过数据但没更新记录"。
