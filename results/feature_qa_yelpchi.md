@@ -1,6 +1,6 @@
 # 特征表 QA：yelpchi
 
-- 数据版本：feature_version=1.0.0，built_at=2026-11-03T13:17:33+08:00，commit=9fa966489f5aa0131e105a92d140322b88ecee40
+- 数据版本：feature_version=1.0.0，built_at=2026-11-03T18:57:47+08:00，commit=3c82a2bda77290e3647e27eaf31e67c0143b3253
 - 行数：38063；账号数：38063；标签分布：{'0': 30024, '1': 8039}；人群分布：{'native': 37763, 'self_injected': 300}
 - 拟合人群：clean_native；scaler：data/processed/features/scaler_yelpchi.json
 - 文本可用：0（评估时据此屏蔽文本方法）
@@ -37,6 +37,6 @@
 
 ## 数据来源（sha256 可追溯）
 
-- `C:\Users\31039\Desktop\work\挖掘机\fake-review-detection\data\processed\augmented_accounts_v2.parquet`（rows=38063, sha256=2cea17607a32cc19833d81b14e2ba9b6dce21e008b6575b1fa52fce9f935553d）
+- `C:\Users\31039\Desktop\work\挖掘机\fake-review-detection\data\processed\augmented_accounts_v2.parquet`（rows=38063, sha256=ff6a3d26e053daef5fa9ec7eb07cd9446f03b0196bbab4d8e9748da09f1dca49）
 - `C:\Users\31039\Desktop\work\挖掘机\fake-review-detection\data\processed\clean_accounts.parquet`（rows=38063, sha256=1f3da4b46dfb62d684a792201743c2218d71ed32c9f1a6d3bd32d11dfa60fb0d）
-- `C:\Users\31039\Desktop\work\挖掘机\fake-review-detection\data\processed\injection_log_v3.json`（rows=300, sha256=8cf5cdefaaca993d356d6c46cbaa4d342bd3ffff35eeab6d8233b9c296061369）
+- `C:\Users\31039\Desktop\work\挖掘机\fake-review-detection\data\processed\injection_log_v2.json`（rows=300, sha256=28a923a5265715682485bc4c425d9c67169c0c609e37e3dbf1013aa50b08ce91）

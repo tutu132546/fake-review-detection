@@ -1,11 +1,76 @@
 {
+  "feature_version": "1.0.0",
   "dataset_id": "fraudsquad_qwen_dsr1",
-  "status": "blocked_by_data",
-  "reason": "缺少数据集文件：C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen_dsr1.parquet",
-  "expected_input": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen_dsr1.parquet",
+  "built_at": "2026-11-03T19:02:22+08:00",
+  "git_commit": "3c82a2bda77290e3647e27eaf31e67c0143b3253",
+  "unified_manifest_sha256": "711813c2d5d9590369b699f5ad5f6905de6679d91ba46519ecd6cb4d542dec69",
+  "source_files": [
+    {
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen_dsr1.parquet",
+      "sha256": "711813c2d5d9590369b699f5ad5f6905de6679d91ba46519ecd6cb4d542dec69",
+      "rows": 89258
+    }
+  ],
+  "rows": 8092,
+  "accounts": 8092,
+  "label_counts": {
+    "0": 6842,
+    "1": 1250
+  },
+  "cohort_counts": {
+    "native": 6842,
+    "hijacked_llm": 1250
+  },
   "text_available": 1,
-  "label_direction": "label_direction_unverified",
-  "fake_raw_values": null,
-  "real_raw_values": null,
-  "expected_fake_rate": null
+  "feature_list": [
+    "n_reviews",
+    "active_days",
+    "daily_avg_reviews",
+    "max_daily_reviews",
+    "burstiness",
+    "rating_deviation",
+    "extreme_ratio"
+  ],
+  "scaler": {
+    "path": "data/processed/features/scaler_fraudsquad_qwen_dsr1.json",
+    "sha256": "00a79e7f5b771a573ac6598e143732796eaeb93f3d072e372ab670913e1b7818",
+    "fit_population": "all_accounts"
+  },
+  "missing_rates": {
+    "n_reviews": 0.0,
+    "active_days": 0.0,
+    "daily_avg_reviews": 0.0,
+    "max_daily_reviews": 0.0,
+    "burstiness": 0.022,
+    "rating_deviation": 0.0,
+    "extreme_ratio": 0.0,
+    "review_rating": 0.0
+  },
+  "label_encoding_check": "passed",
+  "qa": {
+    "schema_violations": 0,
+    "constraint_violations": 0,
+    "nan_feature_cells": 0,
+    "daily_avg_max_abs_diff": 0.0,
+    "z_mean_max_abs": 0.0,
+    "z_std_max_dev": 0.0,
+    "degenerate_features": [],
+    "rows": 8092
+  },
+  "known_issues": [
+    "label_direction_unverified"
+  ],
+  "env": {
+    "python": "3.14.5",
+    "pandas": "3.0.5",
+    "numpy": "2.5.1",
+    "scikit_learn": "1.9.1",
+    "PYTHONHASHSEED": "0"
+  },
+  "python": "C:\\Users\\31039\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+  "table": {
+    "path": "data/processed/features/feature_table_fraudsquad_qwen_dsr1.csv",
+    "sha256": "6f5d8416e539d236c533f584671bac4af4f2c7c2e822431b25cde1690468282e"
+  },
+  "source_dataset": "fraudsquad_qwen_dsr1"
 }

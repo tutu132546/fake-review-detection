@@ -1,13 +1,13 @@
 {
   "feature_version": "1.0.0",
   "dataset_id": "yelpchi",
-  "built_at": "2026-11-03T13:17:33+08:00",
-  "git_commit": "9fa966489f5aa0131e105a92d140322b88ecee40",
+  "built_at": "2026-11-03T18:57:47+08:00",
+  "git_commit": "3c82a2bda77290e3647e27eaf31e67c0143b3253",
   "unified_manifest_sha256": null,
   "source_files": [
     {
       "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\augmented_accounts_v2.parquet",
-      "sha256": "2cea17607a32cc19833d81b14e2ba9b6dce21e008b6575b1fa52fce9f935553d",
+      "sha256": "ff6a3d26e053daef5fa9ec7eb07cd9446f03b0196bbab4d8e9748da09f1dca49",
       "rows": 38063
     },
     {
@@ -16,8 +16,8 @@
       "rows": 38063
     },
     {
-      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\injection_log_v3.json",
-      "sha256": "8cf5cdefaaca993d356d6c46cbaa4d342bd3ffff35eeab6d8233b9c296061369",
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\injection_log_v2.json",
+      "sha256": "28a923a5265715682485bc4c425d9c67169c0c609e37e3dbf1013aa50b08ce91",
       "rows": 300
     }
   ],
@@ -77,6 +77,12 @@
   "python": "C:\\Users\\31039\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
   "table": {
     "path": "data/processed/features/feature_table_yelpchi.csv",
-    "sha256": "5e936a8acc7372e619daa520f43be152ca5b406116562672377e32888dfae612"
+    "sha256": "9b39675b006464e8a6126863aa56091040a6fdb6a7638feec56fe26828e897de"
+  },
+  "source_dataset": "yelpchi_injected",
+  "injection_log": {
+    "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\injection_log_v2.json",
+    "sha256": "28a923a5265715682485bc4c425d9c67169c0c609e37e3dbf1013aa50b08ce91",
+    "rows": 300
   }
 }

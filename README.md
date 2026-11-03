@@ -42,8 +42,8 @@ fake-review-detection/
 |---|---|---|---|---|
 | **YelpChi** | 67,395 条 / 38,063 用户 / 201 商户 | 无 | Yelp 过滤器 | 已构建 |
 | **YelpNYC** | 官方 359,052 条 | 有 | Yelp 过滤器 | 未取得（需邮件申请） |
-| **YelpZip** | 608,458 条 / 260,239 用户 / 5,044 商户 | 有 | Yelp 过滤器 | 已构建 |
-| **FraudSquad-Amazon** | 94,242 条（LLM 生成 7,484） | 有 | 构造即真值 | 已构建 |
+| **YelpZip** | 608,458 条 / 260,239 用户 / 5,044 商户（官方 608,598，实测 −140 条 / −0.023%） | 有 | Yelp 过滤器 | 已构建 |
+| **FraudSquad-Amazon** | 94,242 条（真实基线 86,758 + LLM 生成 7,484）；三份生成集：Llama3 2,489 / Qwen2 2,495 / Qwen-DSR1 2,500，共用真实基线 | 有 | 真实=基线，生成=构造真值 | 已构建 |
 | **YelpChi + 300 注入账号**（自建） | 70,186 条（注入 2,791） | 无 | 注入脚本 | 已构建 |
 
 来源、核验过程与使用条款见 **[docs/data/provenance.md](docs/data/provenance.md)**；
@@ -104,6 +104,7 @@ python src/build_unified_data.py all
 | 文件 | 内容 |
 |---|---|
 | `yelpchi.parquet` / `yelpzip.parquet` / `fraudsquad_amazon.parquet` / `yelpchi_injected.parquet` | 各数据集的统一表 |
+| `fraudsquad_llama3.parquet` / `fraudsquad_qwen2.parquet` / `fraudsquad_qwen_dsr1.parquet` | FraudSquad 三份生成集各自成表（共用真实基线，便于同基线对比） |
 | `all_reviews.parquet` | 上述合并表（84 万条），带 `dataset` 列区分来源 |
 | `manifest.json` | 构建时间、原始文件 sha256、各集统计、官方规模对照 |
 
@@ -129,15 +130,15 @@ label_source, is_injected, text_available, text`。其中 **`label=1` 恒表示�
 1. `python src/step0_convert_metadata.py` -> 生成 `YelpChi_reviews.csv`
 2. `python src/step1_build_account_base.py` -> 生成 `clean_accounts.parquet` 和 `scaler_params.json`
 3. `python src/step2_sample_1000.py` -> 生成 `yelpchi_1000_accounts.csv`
-4. `python src/step3_inject_water_army_pro.py` -> 生成 `augmented_accounts_v2.parquet` 和 `injection_log_v3.json`
+4. `python src/step3_inject_water_army_pro.py` -> 生成 `augmented_accounts_v2.parquet` 和 `injection_log_v2.json`
    - 有 `data/raw/YelpChi_reviews.csv` 时按真实时间戳重算 burstiness 并落 `events_added`；
-   - 缺 review 级数据时必须显式加 `--allow-issue3-blocked`（日志标记 `issue3_status=blocked_by_review_level_data`，不伪造事件）
+   - 缺 `data/raw/YelpChi_reviews.csv` 时脚本直接失败（无 CLI 开关），不会伪造事件
 5. `python src/features/build_feature_table.py --dataset yelpchi` -> 生成
    `data/processed/features/feature_table_yelpchi.csv`、`scaler_yelpchi.json`、
    `results/feature_manifests/feature_table_yelpchi.json` 与 `results/feature_qa_yelpchi.md`
    （B 交付的建模交接表：burstiness 中位数填充 + 缺失标记列 + 每数据集独立 `_z` + 标签守卫，详见 `data_dictionary.md` 第五节；
    同时刷新 `data/processed/feature_table.csv` 兼容旧下游）
-6. `python src/features/build_all.py` -> 批量构建多数据集特征表；缺数据的 YelpZip/FraudSquad 写 `blocked_by_data`，YelpNYC 写 `MISSING` 占位
+6. `python src/features/build_all.py` -> 批量构建多数据集特征表（YelpChi / YelpZip / FraudSquad×3 共 5 张已构建）；YelpNYC 写 `MISSING` 占位；缺数据时写 `blocked_by_data`，不造假表
 7. `python src/viz/feature_eda.py` -> 生成 EDA 图件并输出模板级 dz 方向性判定
 8. `python -m unittest discover -s tests -v` -> 回归测试（Issue #3 / Issue #6 / 标签守卫 / schema 类型）
 

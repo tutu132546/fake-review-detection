@@ -1,6 +1,6 @@
 # 统一数据集质量报告
 
-- 生成时间：2026-11-02T14:11:18+08:00
+- 生成时间：2026-11-03T18:51:53+08:00
 - schema 版本：1.0.0
 - 生成命令：`python src/build_unified_data.py build qa`
 - 判定口径：`label=1` 一律表示虚假评论（水军/LLM 生成/人工注入），`label=0` 为真实评论
@@ -13,6 +13,9 @@
 | yelpnyc | missing | — | — | — | — | — | 359052 | — |
 | yelpzip | ok | 608,458 | 260,239 | 5,044 | 13.22% | 100.0% | 608598 | -0.023% |
 | fraudsquad_amazon | ok | 94,242 | 8,092 | 7,617 | 7.94% | 100.0% | — | — |
+| fraudsquad_llama3 | ok | 89,247 | 8,092 | 7,617 | 2.79% | 100.0% | — | — |
+| fraudsquad_qwen2 | ok | 89,253 | 8,092 | 7,617 | 2.80% | 100.0% | — | — |
+| fraudsquad_qwen_dsr1 | ok | 89,258 | 8,092 | 7,617 | 2.80% | 100.0% | — | — |
 | yelpchi_injected | ok | 70,186 | 38,063 | 201 | 16.68% | 0.0% | — | — |
 
 ## 2. 缺失与偏差说明（如实记录）
@@ -28,6 +31,12 @@
 | yelpzip | yelp_filter | 608,458 |
 | fraudsquad_amazon | real_baseline | 86,758 |
 | fraudsquad_amazon | llm_generated | 7,484 |
+| fraudsquad_llama3 | real_baseline | 86,758 |
+| fraudsquad_llama3 | llm_generated | 2,489 |
+| fraudsquad_qwen2 | real_baseline | 86,758 |
+| fraudsquad_qwen2 | llm_generated | 2,495 |
+| fraudsquad_qwen_dsr1 | real_baseline | 86,758 |
+| fraudsquad_qwen_dsr1 | llm_generated | 2,500 |
 | yelpchi_injected | yelp_filter | 67,395 |
 | yelpchi_injected | injected | 2,791 |
 
@@ -75,6 +84,45 @@
 - 原始文件：`data\raw\fraudsquad\reviews_from_qwen_dsr1.csv`（1,520,028 字节，sha256 `e706b4341bd9d149…`）
 - 统计：94,242 条 / 8,092 用户 / 7,617 商品 / 时间 2021-12-31 ~ 2023-01-03 / 假评论 7,484 条
 - 同一用户—商品—日期出现多条评论：2,097 组。这是原始数据的真实形态（Yelp 允许修改评论、Amazon 允许同一商品多次购买评价），**未做去重**；做用户-商品图时需自行决定是否合并。
+
+### fraudsquad_llama3
+
+- 状态：ok
+- 说明：真实基线 amazon_2022_5core.csv；生成集 ['llama3_8b']
+- 出处：https://github.com/RafaelLiuZH/FraudSquad
+- 引用：Liu et al., Detecting LLM-Generated Spam Reviews by Integrating Language Model Embeddings and Graph Neural Network (FraudSquad), 2026
+- 使用条款：仓库未声明 LICENSE 文件；真实评论部分来自 Amazon Reviews 2023 公开数据集，受 Amazon 数据条款约束；生成部分由作者用 Llama3-8B / Qwen 系列产出。本项目仅作学术研究引用，不再分发原始文件。
+- 原始文件：`data\raw\fraudsquad\amazon_2022_5core.csv.zip`（18,773,569 字节，sha256 `858b1f2f51d5fd78…`）
+- 原始文件：`data\raw\fraudsquad\amazon\amazon_2022_5core.csv`（67,012,970 字节，sha256 `ea618dbb180e6090…`）
+- 原始文件：`data\raw\fraudsquad\reviews_from_llama3_8b.csv`（1,433,276 字节，sha256 `650d5fa18c527b2a…`）
+- 统计：89,247 条 / 8,092 用户 / 7,617 商品 / 时间 2021-12-31 ~ 2023-01-03 / 假评论 2,489 条
+- 同一用户—商品—日期出现多条评论：2,096 组。这是原始数据的真实形态（Yelp 允许修改评论、Amazon 允许同一商品多次购买评价），**未做去重**；做用户-商品图时需自行决定是否合并。
+
+### fraudsquad_qwen2
+
+- 状态：ok
+- 说明：真实基线 amazon_2022_5core.csv；生成集 ['qwen_72b']
+- 出处：https://github.com/RafaelLiuZH/FraudSquad
+- 引用：Liu et al., Detecting LLM-Generated Spam Reviews by Integrating Language Model Embeddings and Graph Neural Network (FraudSquad), 2026
+- 使用条款：仓库未声明 LICENSE 文件；真实评论部分来自 Amazon Reviews 2023 公开数据集，受 Amazon 数据条款约束；生成部分由作者用 Llama3-8B / Qwen 系列产出。本项目仅作学术研究引用，不再分发原始文件。
+- 原始文件：`data\raw\fraudsquad\amazon_2022_5core.csv.zip`（18,773,569 字节，sha256 `858b1f2f51d5fd78…`）
+- 原始文件：`data\raw\fraudsquad\amazon\amazon_2022_5core.csv`（67,012,970 字节，sha256 `ea618dbb180e6090…`）
+- 原始文件：`data\raw\fraudsquad\reviews_from_qwen_72b.csv`（1,468,340 字节，sha256 `71cd6f81dfdb6176…`）
+- 统计：89,253 条 / 8,092 用户 / 7,617 商品 / 时间 2021-12-31 ~ 2023-01-02 / 假评论 2,495 条
+- 同一用户—商品—日期出现多条评论：2,096 组。这是原始数据的真实形态（Yelp 允许修改评论、Amazon 允许同一商品多次购买评价），**未做去重**；做用户-商品图时需自行决定是否合并。
+
+### fraudsquad_qwen_dsr1
+
+- 状态：ok
+- 说明：真实基线 amazon_2022_5core.csv；生成集 ['qwen_dsr1']
+- 出处：https://github.com/RafaelLiuZH/FraudSquad
+- 引用：Liu et al., Detecting LLM-Generated Spam Reviews by Integrating Language Model Embeddings and Graph Neural Network (FraudSquad), 2026
+- 使用条款：仓库未声明 LICENSE 文件；真实评论部分来自 Amazon Reviews 2023 公开数据集，受 Amazon 数据条款约束；生成部分由作者用 Llama3-8B / Qwen 系列产出。本项目仅作学术研究引用，不再分发原始文件。
+- 原始文件：`data\raw\fraudsquad\amazon_2022_5core.csv.zip`（18,773,569 字节，sha256 `858b1f2f51d5fd78…`）
+- 原始文件：`data\raw\fraudsquad\amazon\amazon_2022_5core.csv`（67,012,970 字节，sha256 `ea618dbb180e6090…`）
+- 原始文件：`data\raw\fraudsquad\reviews_from_qwen_dsr1.csv`（1,520,028 字节，sha256 `e706b4341bd9d149…`）
+- 统计：89,258 条 / 8,092 用户 / 7,617 商品 / 时间 2021-12-31 ~ 2023-01-02 / 假评论 2,500 条
+- 同一用户—商品—日期出现多条评论：2,096 组。这是原始数据的真实形态（Yelp 允许修改评论、Amazon 允许同一商品多次购买评价），**未做去重**；做用户-商品图时需自行决定是否合并。
 
 ### yelpchi_injected
 

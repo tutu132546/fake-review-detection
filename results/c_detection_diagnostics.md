@@ -3,7 +3,7 @@
 Preliminary transductive diagnostics, not final detection or DCFO results.
 
 - Population: native; rows: 37,763; features: 8.
-- Source SHA256: `0051cdd29478d119a54440194ac4c61093a7692a99b20f832093e66c0446f39f`.
+- Source SHA256: `9b39675b006464e8a6126863aa56091040a6fdb6a7638feec56fe26828e897de`.
 - Largest identical-feature group: 583 accounts.
 - Duplicate rows beyond first: 26179.
 - Labels excluded from fitting; supplied scaling preserved; no rows deduplicated or perturbed.
@@ -20,15 +20,15 @@ Preliminary transductive diagnostics, not final detection or DCFO results.
 
 ## Runtime and warnings
 
-- LOF k=20: 2.06s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
-- LOF k=50: 2.23s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
-- LOF k=100: 3.36s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
-- LOF k=600: 10.96s. No warning.
-- iForest k=NA: 1.81s. No warning.
+- LOF k=20: 0.55s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
+- LOF k=50: 0.71s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
+- LOF k=100: 0.84s. Duplicate values are leading to incorrect results. Increase the number of neighbors for more accurate results.
+- LOF k=600: 2.91s. No warning.
+- iForest k=NA: 0.43s. No warning.
 
 ## Reproducibility
 
-Python 3.13.7; numpy=2.2.6, pandas=2.3.3, scipy=1.16.2, scikit-learn=1.7.2
+Python 3.14.5; numpy=2.5.1, pandas=3.0.5, scipy=1.18.1, scikit-learn=1.9.1
 
 Use the supplied feature_table.csv and the README command in docs/c_detection.md.
 Native evaluation excludes 300 selected injected accounts. It is not the complete pre-injection clean population.

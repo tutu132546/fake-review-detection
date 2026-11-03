@@ -1,41 +1,48 @@
-# `build_injected` 验收用例（B7）
+# `build_injected` 验收用例（B7，2026-11-03 重跑后）
 
-> 背景：PR #10 的 `build_injected` 仍可能读取 `injection_log_v2.json`（无事件），导致注入表为空。
-> 本文件只定义验收断言，不改 PR 代码；PR 负责人把读取路径切到 v3 后按下列命令执行即可判定。
+> 当前状态：`injection_log_v2.json` 为唯一真源（B1 已重跑），`build_injected` 实测
+> **2,791 条事件 / 70,186 行**，行数守卫 70,186 ± 2% 命中。
+> `injection_log_v3.json`（2,910 条）已退役，仅作历史归档。
 
-## 1. 前置条件
+## 1. 前置条件（当前）
 
-- `data/processed/injection_log_v3.json` 存在，且每条记录含 `events_added` 数组。
-- `build_injected` 读取的是 **v3**（`LOG_PATH = PROCESSED_DIR / "injection_log_v3.json"`）。
+- `data/processed/injection_log_v2.json` 存在，且每条记录满足三件套：
+  `policy`、`events_added` 非空、`physical_checks == "passed"`（见 `docs/feature_contract.md` §7）。
+- `data/raw/YelpChi_reviews.csv` 存在（step3 需要真实时间戳；缺失时脚本直接失败，不会伪造事件）。
+- `build_injected` 读取 `injection_log_v2.json`，并断言注入后总行数 70,186 ± 2%。
 
-## 2. 验收断言（全部为硬断言）
+## 2. 验收断言（全部为硬断言，数值为本地实测 [已算]）
 
-| # | 断言 | 期望值（本地实测） | 判定方式 |
+| # | 断言 | 期望值 | 判定方式 |
 |---|---|---:|---|
 | 1 | 注入事件表非空 | > 0 | `len(df) > 0` |
-| 2 | 事件总行数 = 日志 `events_added` 总数 | **2,910** | 与日志求和比对 |
-| 3 | 模板 A 事件数 | **983** | 按 `user_id` 映射模板后计数 |
-| 4 | 模板 B 事件数 | **977** | 同上 |
-| 5 | 模板 C 事件数 | **950** | 同上 |
-| 6 | 必备字段 | `user_id, item_id, rating, date` | 列名集合检查 |
-| 7 | `rating` 全部为 5 | 100% | `(df.rating == 5).all()` |
-| 8 | `date` 可解析且无缺失 | 100% | `to_datetime(errors='coerce').notna().all()` |
+| 2 | 事件总行数 = 日志 `events_added` 总数 | **2,791** | 与日志求和比对 |
+| 3 | 模板 A 事件数 | **915** | 按 `user_id` 映射模板后计数 |
+| 4 | 模板 B 事件数 | **967** | 同上 |
+| 5 | 模板 C 事件数 | **909** | 同上 |
+| 6 | 注入后总行数 | **70,186**（守卫 ±2%） | `len(clean) + 事件数` 与 `yelpchi_injected` 表行数 |
+| 7 | 必备字段 | `user_id, item_id, rating, date` 无缺失 | 列名集合 + `isna().sum()` |
+| 8 | `rating` 取值 | 仅 `{1, 5}`；5 星占比 **91.54%** | `isin([1,5]).all()` + 占比在 90–95% |
+| 9 | `date` 可解析 | 100% | `to_datetime(errors='coerce').notna().all()` |
 
-> 修正说明：清单原写"3 模板各 970 条"为估算；实测为 **983 / 977 / 950**（合计 2,910），以实测为准 [已算]。
-> 若 PR 输出的模板分布不同于上表，先查是否按 `user_id` 正确关联日志，而不是直接改期望值。
+> 口径说明：旧用例写"rating 全部为 5"，与注入策略（90–95% 五星、其余 1 星）不符，已改为
+> "仅取 {1,5} 且五星占比落在 90–95%"。实测 2,555 条 5 星 + 236 条 1 星 = 91.54%。
+> 旧用例的 2,910 / 983 / 977 / 950 为 v3 历史值，已全部替换为 v2 实测值。
 
-## 3. 执行命令（PR 改完后）
+## 3. 执行命令
 
 ```bash
-python src/step3_inject_water_army_pro.py          # 确保日志为 v3 且 300 条 recomputed
+python src/step3_inject_water_army_pro.py                # 生成 v2（2,791 事件 / 70,186 行）
+python src/build_unified_data.py build                   # 构建 unified/yelpchi_injected.parquet
 python -m unittest tests.test_features.InjectionRegressionTests -v
 ```
 
-验收通过判据：断言 1–8 全 True；`InjectionRegressionTests` 全绿。
+验收通过判据：断言 1–9 全 True；`InjectionRegressionTests` 实际执行且全绿（不再 skip）。
 
 ## 4. 失败时的定位顺序
 
-1. 事件表为空 → 检查 `build_injected` 读取路径是否仍为 v2；
-2. 行数 ≠ 2,910 → 对比日志 `add_n` 与 `events_added`（当前两者相等）；
-3. 字段缺失 → 检查 v3 事件字段名（`product_id/rating/date`，按统一 schema 需映射为 `item_id`）；
-4. 模板分布不符 → 检查日志 `user_id` 类型（int）与表内 `user_id`（str）关联是否失败。
+1. 事件表为空 → 检查 `build_injected` 读取路径是否为 v2，且 v2 的 `events_added` 非空；
+2. 行数 ≠ 2,791 → 对比日志 `policy.n_add` 与 `events_added`（当前两者严格相等）；
+3. 总行数偏离 70,186 超过 2% → 先确认评论底表与日志是否同版（`YelpChi_reviews.csv` 行数 67,395）；
+4. 字段缺失 → 检查日志事件字段 `product_id/rating/date` 是否正确映射为统一 schema 的 `item_id`；
+5. 模板分布不符 → 检查日志 `user_id` 类型（int）与表内 `user_id`（str）关联是否失败。
