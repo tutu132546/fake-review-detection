@@ -1,6 +1,6 @@
 # 特征表 QA：yelpchi
 
-- 数据版本：feature_version=1.0.0，built_at=2026-11-03T13:10:04+08:00，commit=c3c910025e50310931bbcf70adc06df584c06801
+- 数据版本：feature_version=1.0.0，built_at=2026-11-03T13:11:01+08:00，commit=5ab95567992b95b0d1e1817699b09183489853ed
 - 行数：38063；账号数：38063；标签分布：{'0': 30024, '1': 8039}；人群分布：{'native': 37763, 'self_injected': 300}
 - 拟合人群：clean_native；scaler：data/processed/features/scaler_yelpchi.json
 - 文本可用：0（评估时据此屏蔽文本方法）

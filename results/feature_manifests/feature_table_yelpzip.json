@@ -1,0 +1,6 @@
+{
+  "dataset_id": "yelpzip",
+  "status": "blocked_by_data",
+  "reason": "缺少数据集文件：C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\yelpzip.parquet",
+  "expected_input": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\yelpzip.parquet"
+}

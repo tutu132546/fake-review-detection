@@ -1,0 +1,6 @@
+{
+  "dataset_id": "fraudsquad_qwen2",
+  "status": "blocked_by_data",
+  "reason": "缺少数据集文件：C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen2.parquet",
+  "expected_input": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen2.parquet"
+}
