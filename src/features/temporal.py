@@ -25,8 +25,14 @@ def calc_burstiness(timestamps):
 
 
 def active_days(dates):
-    """账号活跃跨度：(max(date) - min(date)).days + 1；单条评论为 1。"""
-    s = pd.to_datetime(pd.Series(list(dates)))
+    """账号活跃跨度：首末评论的自然日跨度（含首末两天）；单条评论为 1。
+
+    以自然日归一后再相减：FraudSquad / YelpZip 是秒级时间戳，若直接用
+    (max-min).days 会得到"地板跨度"，与 max_daily_reviews 的按自然日计数口径不一致，
+    进而破坏 n_reviews <= active_days * max_daily_reviews 的恒等式。
+    YelpChi 为日粒度，归一前后结果不变。
+    """
+    s = pd.to_datetime(pd.Series(list(dates))).dt.normalize()
     return int((s.max() - s.min()).days) + 1
 
 

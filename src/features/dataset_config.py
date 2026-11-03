@@ -54,6 +54,7 @@ class DatasetSpec:
     require_label_source: bool = False
     new_account_cohort: str = 'native'   # 有生成评论的账号人群名（FraudSquad=hijacked_llm）
     missing_reason: Optional[str] = None
+    source_dataset: Optional[str] = None  # 上游统一层数据集名（溯源用，A8：yelpchi → yelpchi_injected）
 
     @property
     def expected_fake_rate(self):
@@ -75,7 +76,7 @@ def _spec(dataset_id: str, display_name: str, mode: str, input_path: Optional[Pa
           expected_rows=None, expected_fake_review_rate=None,
           fake_raw_values=None, real_raw_values=None,
           require_label_source=False, new_account_cohort='native',
-          missing_reason=None) -> DatasetSpec:
+          missing_reason=None, source_dataset=None) -> DatasetSpec:
     name = f'feature_table_{dataset_id}'
     return DatasetSpec(
         dataset_id=dataset_id,
@@ -96,6 +97,7 @@ def _spec(dataset_id: str, display_name: str, mode: str, input_path: Optional[Pa
         require_label_source=require_label_source,
         new_account_cohort=new_account_cohort,
         missing_reason=missing_reason,
+        source_dataset=source_dataset,
     )
 
 
@@ -103,7 +105,7 @@ DATASETS = {s.dataset_id: s for s in [
     # YelpChi 自注入实验：直接消费账号级 augmented 表（方案 11.5 兜底路径），不依赖 review 级数据
     _spec('yelpchi', 'YelpChi（metadata 版，含 300 自注入）', 'account_base',
           PROCESSED_DIR / 'augmented_accounts_v2.parquet', 0, 'clean_native',
-          expected_rows=38063),
+          expected_rows=38063, source_dataset='yelpchi_injected'),
     _spec('yelpzip', 'YelpZip', 'unified_reviews', UNIFIED_DIR / 'yelpzip.parquet', 1,
           'all_accounts', expected_fake_review_rate=0.1322,
           fake_raw_values=('-1',), real_raw_values=('1',)),

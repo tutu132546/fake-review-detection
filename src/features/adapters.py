@@ -27,7 +27,8 @@ from features.manifest import sha256_file
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 UNIFIED_REQUIRED = ['user_id', 'item_id', 'rating', 'date', 'label']
-LEGAL_LABEL_SOURCES = {'platform_filter', 'real_baseline', 'llm_generated', 'injected'}
+# 与 src/data/schema.LABEL_SOURCE_VALUES 对齐（A4）：平台过滤 / 真实基线 / 模型生成 / 人工生成 / 自注入
+LEGAL_LABEL_SOURCES = {'yelp_filter', 'real_baseline', 'llm_generated', 'human_generated', 'injected'}
 MAX_BAD_RATIO = 0.005          # date / rating 解析失败上限（F.3）
 MAX_ITEM_MISSING_RATIO = 0.001 # item_id 缺失上限（F.3）
 LABEL_DIRECTION_UNVERIFIED = 'label_direction_unverified'
@@ -109,25 +110,29 @@ def load_unified(spec: DatasetSpec) -> LoadedDataset:
 
     n_raw = len(df)
     df = df.copy()
+    item_missing = int(df['item_id'].isna().sum())   # 先统计再转字符串，避免 NaN 变成 'nan'
     df['user_id'] = df['user_id'].astype(str)
     df['item_id'] = df['item_id'].astype(str)
-    df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
+    raw_rating = df['rating']
+    df['rating'] = pd.to_numeric(raw_rating, errors='coerce')
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
     bad_date = int(df['date'].isna().sum())
-    bad_rating = int(df['rating'].isna().sum())
-    item_missing = int(df['item_id'].isna().sum())
+    # A6：只有"非空却解析失败"才算 parser 问题；原始缺失的 rating 计入缺失率，不触发 0.5% 上限
+    bad_rating = int((raw_rating.notna() & df['rating'].isna()).sum())
     for name, n in (('date', bad_date), ('rating', bad_rating)):
         if n / max(n_raw, 1) > MAX_BAD_RATIO:
             raise ValueError(f"{spec.dataset_id} {name} 解析失败 {n}/{n_raw}，超过 0.5% 上限，先修 parser")
     if item_missing / max(n_raw, 1) > MAX_ITEM_MISSING_RATIO:
         raise ValueError(f"{spec.dataset_id} item_id 缺失 {item_missing}/{n_raw}，超过 0.1% 上限")
-    df = df.dropna(subset=['date', 'rating', 'item_id'])
+    # A6：rating 缺失不再静默丢行，只丢弃无法定位的 date / item_id；缺失率进 label_stats 供 QA 报告
+    rating_missing = int(df['rating'].isna().sum())
+    df = df.dropna(subset=['date', 'item_id'])
 
     label_source = df['label_source'] if 'label_source' in df.columns else None
     label_encoding_check = _assert_label_encoding(df['label'], label_source, spec.require_label_source)
     if label_source is None:
-        df['label_source'] = 'platform_filter'
+        df['label_source'] = 'yelp_filter'
 
     fake_rate = float(df['label'].mean())
     if spec.expected_fake_review_rate is not None:
@@ -145,47 +150,61 @@ def load_unified(spec: DatasetSpec) -> LoadedDataset:
                          source_files=source,
                          label_stats={'rows': int(len(df)),
                                       'label_counts': {str(k): int(v) for k, v in
-                                                       df['label'].value_counts().sort_index().items()}},
+                                                       df['label'].value_counts().sort_index().items()},
+                                      'rating_missing_rows': rating_missing,
+                                      'rating_missing_rate': round(rating_missing / max(len(df), 1), 6)},
                          label_encoding_check=label_encoding_check,
                          known_issues=known_issues)
 
 
 def aggregate_account_labels(reviews: pd.DataFrame, spec: DatasetSpec) -> pd.DataFrame:
-    """账号级标签与人群：account_is_fake = max(label)；有生成评论的账号 = hijacked_llm。"""
+    """账号级标签与人群（A5）：is_injected 按评论列聚合；cohort 优先识别注入账号。"""
     label = reviews.groupby('user_id', sort=True)['label'].max().astype('int8')
-    is_injected = pd.Series(0, index=label.index, dtype='int8')
-    cohort = pd.Series(np.where(label == 1, spec.new_account_cohort, 'native'),
-                       index=label.index, dtype='object')
+    if 'is_injected' in reviews.columns:
+        is_injected = reviews.groupby('user_id', sort=True)['is_injected'].max().astype('int8')
+    else:
+        is_injected = pd.Series(0, index=label.index, dtype='int8')
+    cohort = pd.Series(
+        np.where(is_injected.to_numpy() == 1, 'self_injected',
+                 np.where(label.to_numpy() == 1, spec.new_account_cohort, 'native')),
+        index=label.index, dtype='object')
     return pd.DataFrame({'account_is_fake': label, 'is_injected': is_injected, 'cohort': cohort})
 
 
-def _issue3_known_issues():
-    """读取注入日志（优先 v3）判断 Issue #3 是否仍未修复。"""
+def injection_log_issues(log: list) -> list:
+    """检查注入日志是否满足 v2 三件套：policy / events_added / physical_checks。
+
+    重跑后的 step3 不再写 issue3_status，因此以这三项为准（A3）。
+    单一真源为 v2（A2）；v3 仅作历史归档。返回问题码列表，空列表表示通过。
+    """
     issues = []
-    v3 = PROCESSED_DIR / 'injection_log_v3.json'
-    v2 = PROCESSED_DIR / 'injection_log_v2.json'
-    path = v3 if v3.exists() else (v2 if v2.exists() else None)
-    if path is None:
-        return ['issue3_unfixed', 'review_level_events_missing']
+    if any('policy' not in r for r in log):
+        issues.append('injection_policy_missing')
+    if sum(len(r.get('events_added') or []) for r in log) == 0:
+        issues.append('review_level_events_missing')
+    if any('physical_checks' not in r for r in log):
+        issues.append('physical_checks_missing')
+    elif any(r.get('physical_checks') != 'passed' for r in log):
+        issues.append('physical_checks_failed')
+    return issues
+
+
+def _issue3_known_issues():
+    """读取注入日志（唯一真源 v2）判断 Issue #3 是否仍未修复。"""
+    path = PROCESSED_DIR / 'injection_log_v2.json'
+    if not path.exists():
+        return ['injection_log_missing', 'review_level_events_missing']
     with open(path, encoding='utf-8') as f:
         log = json.load(f)
-    statuses = {r.get('issue3_status') for r in log}
-    if statuses == {'recomputed'}:
-        pass
-    else:
-        issues.append('issue3_unfixed')
-    if sum(len(r.get('events_added', [])) for r in log) == 0:
-        issues.append('review_level_events_missing')
-    return issues
+    return injection_log_issues(log)
 
 
 def load_yelpchi_account_base(spec: DatasetSpec) -> LoadedDataset:
     """YelpChi 自注入路径：直接消费账号级 augmented 表（不依赖 review 级数据）。"""
     aug_path = Path(spec.input_path)
     clean_path = PROCESSED_DIR / 'clean_accounts.parquet'
-    log_path = PROCESSED_DIR / 'injection_log_v3.json'
-    if not log_path.exists():
-        log_path = PROCESSED_DIR / 'injection_log_v2.json'
+    # A2：唯一真源为 v2；v3 仅作历史归档，不再被代码引用
+    log_path = PROCESSED_DIR / 'injection_log_v2.json'
     aug = _read_table(aug_path)
     clean = _read_table(clean_path)
     with open(log_path, encoding='utf-8') as f:

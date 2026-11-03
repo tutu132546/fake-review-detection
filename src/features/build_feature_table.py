@@ -256,9 +256,21 @@ def build_dataset(spec: DatasetSpec, input_path=None, output_path=None,
     if 'burstiness_missing' not in base.columns:
         base['burstiness_missing'] = base['burstiness'].isna().astype('int8')
 
-    # 拟合人群：YelpChi 用注入前 clean 底表（含原生真假、不按标签筛）；其他用该份全部账号
-    fit_df = loaded.fit_features if loaded.kind == 'account_base' else base[FEATURE_LIST]
+    # 拟合人群：YelpChi 用注入前 clean 底表（含原生真假、不按标签筛）；
+    # 其他数据集用全部账号，但排除注入行（A5：fit 行数 = 总行数 − 注入行）
+    if loaded.kind == 'account_base':
+        fit_df = loaded.fit_features
+    else:
+        injected_rows = int(base['is_injected'].sum())
+        fit_df = base.loc[base['is_injected'] == 0, FEATURE_LIST].reset_index(drop=True)
+        if fit_df.empty:
+            raise ValueError(f"{spec.dataset_id} 排除注入行后拟合人群为空，无法拟合 scaler")
+        logging.info(f"[{spec.dataset_id}] scaler 拟合人群 {len(fit_df) + injected_rows} - "
+                     f"{injected_rows}（注入行）= {len(fit_df)}")
     missing_rates = {c: float(base[c].isna().mean()) for c in FEATURE_LIST}
+    if loaded.kind == 'unified_reviews':
+        # A6：评论级 rating 缺失率进入 QA 报告（不丢行，只记录）
+        missing_rates['review_rating'] = float(loaded.label_stats.get('rating_missing_rate', 0.0))
     median = float(fit_df['burstiness'].dropna().median())
     logging.info(f"[{spec.dataset_id}] 3. burstiness 缺失 {missing_rates['burstiness']:.2%}，"
                  f"用拟合人群中位数 {median:.6f} 填充")
@@ -301,6 +313,12 @@ def build_dataset(spec: DatasetSpec, input_path=None, output_path=None,
     with open(spec.scaler_path, 'w', encoding='utf-8') as f:
         json.dump(scaler, f, indent=2, ensure_ascii=False)
 
+    # A8：溯源字段——统一层数据集名 + 注入日志 sha256（v2 为唯一真源）
+    extra = {'source_dataset': spec.source_dataset or spec.dataset_id}
+    injection_log = next((s for s in loaded.source_files
+                          if Path(s['path']).name == 'injection_log_v2.json'), None)
+    if injection_log:
+        extra['injection_log'] = injection_log
     manifest = build_manifest(
         spec, out, scaler, missing_rates, loaded.source_files,
         fit_population=spec.scaler_fit_population,
@@ -309,6 +327,7 @@ def build_dataset(spec: DatasetSpec, input_path=None, output_path=None,
         known_issues=loaded.known_issues,
         unified_manifest_sha256=sha256_file(spec.input_path)
         if loaded.kind == 'unified_reviews' else None,
+        extra=extra,
     )
     write_manifest(spec.manifest_path, manifest)
     qa_path = RESULTS_DIR / f'feature_qa_{spec.dataset_id}.md'
