@@ -44,24 +44,28 @@
 - 标签方向：YelpZip 已声明 `fake=-1 / real=1`；FraudSquad×3 未声明，manifest 标 `label_direction_unverified`，需上游确认原始 `label` 语义后才能启用方向校验。
 
 
-## 三、 水军注入实验说明 (物理行为模拟)
+## 三、 水军注入实验说明 (事件层行为模拟，v3.0 / 2026-10-24)
 
-*   **注入对象**：从 `clean_accounts.parquet` 中抽取 `n_reviews >= 5` 的正常账号 300 个。
-*   **注入原理**：模拟水军突击新增 5~15 条极端评价的行为。
-*   **特征联动更新**：
-    *   评论数 `n_reviews` 对应增加；单日最大发评 `max_daily_reviews` 在模板 A/C 下由合并时间序列直接重算（实测 200/200 变化），模板 B 因刻意不改时间戳，若原有值不足以容纳新增评论则按 `ceil(new_n / active_days)` 补齐物理约束（Issue #6，实测 2 个账号）。
-    *   活跃期 `active_days` 一般不变，仅当新增评论落在原活跃期外时扩展（实测 2 个账号，均在模板 C）。
-    *   极端评分比例 `extreme_ratio` 按 `(旧极端数 + 新增数) / 新总数` 精确重新计算。
-    *   爆发性 `burstiness`：**仅在提供 review 级时间戳（`YelpChi_reviews.csv`）时**，为新增评论构造日期并合并新旧时间序列后用 `calc_burstiness` 重算（物理上集中爆发会混入近 0 间隔、波动增大，应升高）；原本不可定义（NaN）的账号保持 NaN。缺少 review 级数据时逐条标记 `issue3_status=blocked_by_review_level_data`，保留原实现值但**不作方向性结论**，禁止用乘系数冒充修复（见 §9 注）。
-*   **防漏机制**：所有修改后的特征，均同步通过 `scaler_params.json` 重新计算对应的 `_z` 列，确保数据分布完全自洽。
+*   **注入对象**：`clean_accounts.parquet` 中 `n_reviews >= 5` 的正常账号，`random_state=42` 抽 300 个（与原版同一批账号，便于和历史结果对照），每号新增 5~14 条评论。
+*   **注入原理（已从"改特征值"改为"造事件"）**：为每个账号生成 (日期, 评分, 商品) 三元组追加进真实流水，再用与 `step1` **逐位相同**的公式重算全部 7 个特征。因此"单日发评 > 总评论数""日均 != 总数/活跃天数"这类矛盾由构造消除，不再靠手工同步。
+    *   **时间**：三条模板都只落在账号原活跃区间 `[首条, 末条]` 内，`active_days` 严格不变（避免"沉寂多年后突然复活"的痕迹）。
+        *   `A_Time_Burst`：全部压在最末活跃日 → 单日爆发，`max_daily` 与 `burstiness` 显著上升；
+        *   `B_Rating_Polarization`：只撒在活跃期的**空闲日**（每天 1 条）→ 单日峰值不变，时间维度影响最小；
+        *   `C_Stealth_Mix`：40% 压末活跃日 + 60% 撒开 → 介于两者之间。
+    *   **评分**：新增评论 90~95% 为 5 星、其余 1 星（全部是极端分）。
+    *   **商品**：每条一个新商品，且避开本人已评商品（YelpChi 中一个用户对同一商品只有一条评论）。
+*   **爆发性方向已修正**：`burstiness` 由真实时间戳按 `calc_burstiness` 重算（间隔 std/mean，<3 条或全部同日为 NaN）。集中爆发会混入大量 0 间隔，`std/mean` 上升——方向由公式保证，不再依赖假设。原本为 NaN 的账号保持 NaN。
+*   **可控边界（如实声明，不掩盖）**：真实历史不可编辑，`n_reviews` 只能增不能减。当账号活跃期只有 1~2 天、没有任何空闲日时（本批 300 个里有 2 个：uid 5683、9296），新增评论只能并入原唯一活跃日，`max_daily_reviews` 必然随总数上调。这是物理必然，日志中完整记录，且 `n_reviews <= active_days * max_daily_reviews` 由构造保证成立。
 
-## 四、 注入日志 (`injection_log_v3.json`)
-*   `user_id`: 被注入的账号 ID。
-*   `injection_template`: 使用的模板名称（A_Time_Burst / B_Rating_Polarization / C_Stealth_Mix）。
-*   `add_n`: 本次新增评论数（300 条记录合计 2,910，与 aug 表 `n_reviews` 增量一致）。
-*   `events_added`: 新增评论逐条落账（`product_id` / `rating` / `date`）；提供 review 级数据时 300 条记录合计 2,910（与 `add_n` 合计一致）。模板 B 的事件仅作台账，不参与时间特征重算（B 为评分侧模板）；无 review 级时间戳时为 `[]`（不伪造）。
-*   `issue3_status`: `recomputed`（按真实时间戳重算）或 `blocked_by_review_level_data`（缺数据，方向待验证）。
-*   `modified_features`: 字典结构，记录特征变化（如 `max_daily_reviews: {original: 2, mutated: 12}`）。用于后续验证 DCFO 的因果解释。**已修复为完整记录**：实际被修改的特征全部入账（含 n_reviews 与 daily_avg_reviews），日志数值与 aug 表核对 1502/1502 项一致（4 位小数精度）。
+## 四、 注入日志 (`injection_log_v2.json`)
+顶层仍是**记录数组**（`feature_eda.py` 按 `user_id` / `injection_template` 读取，格式未变），每条记录包含：
+*   `user_id` / `injection_template`：账号 ID 与模板名（A_Time_Burst / B_Rating_Polarization / C_Stealth_Mix），与旧版字段一致。
+*   `policy`：本次注入的行为参数——`n_add`、`temporal`（burst_last_day / spread_free_days / cluster+spread）、`cluster_size`、`free_days_used`、`p_five_star`。用于回答"这次注入模拟了什么行为"。
+*   `events_added`：逐条 `{date, rating, product_id}`，即真实注入的事件明细（可复核、可重放）。
+*   `modified_features`：只列**实际发生变化的**特征，形如 `max_daily_reviews: {original: 1, mutated: 12, delta_sigma: 22.8}`。
+*   `feature_delta_sigma`：全部 7 个特征的 σ 单位增量（DCFO 反事实解释的 ground truth 对齐基准，含未变化项=0）。
+*   `n_real` / `n_fake`：注入前真实条数、本次新增条数。
+*   `physical_checks`：`passed`（注入前后 9 项断言全部通过才落盘）。
 
 # 五、特征交接说明（B 成员交付，面向建模）
 
@@ -108,9 +112,20 @@ NaN 共 32,918/38,063（86.5%）：其中 32,666 个为评论数 < 3（数据不
 注入行仅 2/300 为 NaN（注入池要求 n_reviews ≥ 5；按合并时间序列重算后 NaN 数量不变，原本不可定义者保持 NaN）。
 
 ## 6. 组间比较陷阱（重要）
-注入组 `active_days_z` 组均值偏高（+2.24）是**选池偏差**（注入池只选 n_reviews ≥ 5 的正常号），不是注入效应——active_days 基本未动（300 个账号中仅 2 个因新增评论落在原活跃期外而扩展，均值 dz 在 0.001 量级）。
-评估注入效应必须用**配对差值 dz**（同一账号注入前后 `_z` 变化）。修复后实测 dz 基准（2026-11-03，300 账号，`issue3_status=recomputed`）：
-n_reviews +4.61（A +4.68 / B +4.65 / C +4.52）｜ max_daily_reviews +10.01（A +15.37 / C +14.43；B 仅 2 个账号补齐约束，均值 +0.22）｜ burstiness +1.33（A +1.90 / C +2.08；Issue #3 已按真实时间序列重算，方向转为正向）｜ rating_deviation +0.61（B +0.86 / C +0.97）｜ extreme_ratio +0.77 ｜ daily_avg_reviews +0.29 ｜ active_days 0.00（仅 2 个 C 模板账号扩展）。
+注入组 `active_days_z` 组均值偏高（+2.24）是**选池偏差**（注入池只选 n_reviews ≥ 5 的正常号），不是注入效应——active_days 严格未动（dz=0）。
+评估注入效应必须用**配对差值 dz**（同一账号注入前后 `_z` 变化）。v3.0 实测基准（2026-10-24，n=100/模板）：
+
+| 特征 | A_Time_Burst | B_Rating_Polarization | C_Stealth_Mix |
+|---|---|---|---|
+| n_reviews | +4.35 | +4.60 | +4.32 |
+| active_days | 0 | 0 | 0 |
+| daily_avg_reviews | +0.48 | +0.32 | +0.14 |
+| max_daily_reviews | +18.61 | +0.37 | +6.71 |
+| burstiness | **+2.34** | −0.21 | **+0.35** |
+| rating_deviation | +0.48 | +0.36 | +0.41 |
+| extreme_ratio | +0.76 | +0.78 | +0.73 |
+
+读法：A 的主导缺陷在时间维度（max_daily/burstiness），B 几乎不动时间维度、主导缺陷在评分维度，C 介于两者。`daily_avg_reviews` 的模板间差异来自活跃期极短的少数账号（分母小，同样新增条数带来的 dz 极大），不代表模板设计差异。
 
 **选池偏差对评估的三条纪律**（同样适用于 AUC，不仅是组均值）：
 1. 论文主结论只用原生标签（account_is_fake）结果；注入组仅用于验证解释方法（DCFO）。
@@ -118,13 +133,15 @@ n_reviews +4.61（A +4.68 / B +4.65 / C +4.52）｜ max_daily_reviews +10.01（A
 3. 需要与注入组对比时，对照组必须用同条件（n_reviews≥5）的未注入正常号，而非全体正常号。
 
 ## 7. 特征 ↔ 注入模板对照（DCFO 验证的 ground truth）
-| 模板 | 数量 | 实际修改的特征 |
-|---|---|---|
-| A_Time_Burst | 100 | n_reviews, max_daily_reviews, burstiness, extreme_ratio, daily_avg_reviews |
-| B_Rating_Polarization | 100 | n_reviews, rating_deviation, extreme_ratio, daily_avg_reviews；其中 2 个账号按 Issue #6 补齐 max_daily_reviews |
-| C_Stealth_Mix | 100 | n_reviews, max_daily_reviews, burstiness, rating_deviation, extreme_ratio, daily_avg_reviews |
+| 模板 | 数量 | 主导缺陷（设计意图） | 实测 dz 排序（前 3） |
+|---|---|---|---|
+| A_Time_Burst | 100 | 时间爆发 | max_daily +18.6 ≫ burstiness +2.3 > extreme_ratio +0.8 |
+| B_Rating_Polarization | 100 | 评分极化 | extreme_ratio +0.8 > rating_deviation +0.4 ≫ max_daily +0.4 |
+| C_Stealth_Mix | 100 | 混合 | max_daily +6.7 > extreme_ratio +0.7 > rating_deviation +0.4 |
 
-注：个别账号"被修改但数值不变"也如实记录（如 4 个原本全 5 星账号的 extreme_ratio 仍为 1.0、1 个全同日账号的 burstiness 仍为 NaN），日志 original=mutated 属预期。
+**重要变化（v3.0）**：事件层注入下，模板不再能做到"只改某几个特征"。新增一条评论必然同时改变 `n_reviews`、`daily_avg`、评分类特征，并可能改变 `max_daily`/`burstiness`——这是"特征由事件推导"的必然结果，也正是旧版出现造假痕迹的原因。模板之间的真正差异是**各类特征变化的主导程度**（见上表），而不是严格的特征隔离。
+
+因此 DCFO 验证的 ground truth 应以日志里的 `feature_delta_sigma`（7 维全量）为准，而不是"模板名义上要改哪几个特征"。个别账号"被修改但数值不变"也如实记录（如原本全 5 星账号的 extreme_ratio 仍为 1.0），日志 original=mutated 属预期。
 
 ## 8. 单特征区分度（ROC-AUC vs account_is_fake）
 | 特征 | 全表（含注入） | 仅原生（YelpChi 真实标签） |
@@ -146,10 +163,120 @@ n_reviews +4.61（A +4.68 / B +4.65 / C +4.52）｜ max_daily_reviews +10.01（A
 | `results/feature_eda_group_box.png` | 原生正常 / 原生水军 / 注入水军 三组 7 特征 `_z` 箱线图（burstiness 按未填充值绘制，NaN 不参与；箱体隐藏离群点） |
 | `results/feature_eda_template_dz.png` | 注入前后配对 dz 的模板级均值对比（A/B/C 三色柱状图），消除选池偏差 |
 
-可证伪判定 13 项全部 PASS（2026-11-03 实测，`issue3_status=recomputed`）：
-- 全模板公共效应：n_reviews dz>0（300/300，均值 +4.61）、daily_avg_reviews dz>0（300/300，均值 +0.29，修复前恒为 0）、extreme_ratio dz>=0（296/300 上升，其余 4 个本就全 5 星，数值不变）；active_days 基本未动（均值 dz=0.000，仅 2/200 个 A/C 账号扩展活跃期，判定为 dz>=0）。
-- 模板特异性：A/C 的 max_daily_reviews dz>0（+15.37 / +14.43，200/200 变化）；A/C 的 burstiness dz>0（+1.90 / +2.08，199/200 重算，1 个原本全同日账号保持 NaN）；B/C 的 rating_deviation dz>0（+0.86 / +0.97）。
-- Issue #6 修复校验：模板 B 的 max_daily_reviews 由"恒为 0"改为"约束校验"——dz>=0 且 dz>0 的账号数（2/100）与日志补齐数一致，全表 `n_reviews <= active_days * max_daily_reviews` 违规 0 行（已算）。
-- Issue #3 修复校验（已 PASS）：`issue3_status=recomputed`，`events_added` 合计 2,910 与 `add_n` 合计一致；模板 A/C 的 burstiness dz 由修复前的 −1.44 / −1.59 转为 **+1.90 / +2.08**，方向与"集中爆发→间隔波动增大"的物理预期一致（[已算]，300 账号配对 dz）。
-- 未动特征恒为 0：B 的 burstiness、A 的 rating_deviation。
+v3.0 实测（2026-10-24）：9 项 PASS + 3 项由硬判据降级为观测项（原因见下）。
+- 全模板公共效应：n_reviews dz>0（300/300，均值 +4.42）、daily_avg_reviews dz>0（300/300，均值 +0.31）、extreme_ratio dz>=0（296/300 上升，其余 4 个本就全 5 星，数值不变）；active_days dz=0（300/300，未动）。
+- 模板特异性：A/C 的 max_daily_reviews dz>0（+18.6 / +6.7）；B/C 的 rating_deviation dz>0（+0.36 / +0.41）。
+- **burstiness 方向已修复（Issue1 已关闭）**：A +2.34、C +0.35，均为正。机制：新增评论压在同一活跃日会引入大量 0 间隔，`std/mean` 上升；数值由 `calc_burstiness` 直接对合并后的时间戳算出，不再乘系数、不再依赖假设。
+- **B 的 burstiness / max_daily 不再"恒为 0"，降级为观测项**：B 只撒空闲日，`max_daily` 的 +0.37 全部来自 2 个没有任何空闲日的账号（uid 5683、9296 —— 正是 Issue2 点名的那两个），其余 98 个账号该值严格不变；`burstiness` −0.21 是因为往账号的安静期插入评论会让间隔序列趋于均匀（变异系数向 1 收敛），属"插入时间点"的数学后果，不是模板效应。
+- **A 的 rating_deviation 不再"恒为 0"，降级为观测项**：A 新增评论都是 5 星，必然抬高评分偏离（+0.48）。旧版为 0 是因为它根本没生成评分，只改了几个数值。
+- 另：`feature_eda.py` 里 3 条 `dz==0` 的硬判据（B 的 max_daily、B 的 burstiness、A 的 rating_deviation）在"事件层注入"下不可能成立——除非继续造假。需由 B 改为容差判定或观测项，具体建议见 PR 说明。
 读图提示：图 1 中"原生水军"的 daily_avg_reviews 箱体退化为一条线（约 z=0.6），是因为大量原生假号只有 1 条评论（1/1 天），取值高度集中——这本身是 YelpChi 假号"少评短活"画像的证据。
+
+## 10. D 模块产出：图算法社区发现
+*   **`data/processed/graph_scores.csv`**：由 `src/models/graph_community_detection.py` 生成，包含图算法对全量账号的社区划分与打分。
+    *   `user_id`: 账号唯一标识。
+    *   `group_id`: Louvain 图算法划分的社区/团伙 ID。
+    *   `graph_score`: 账号级图可疑分数，范围 `[0, 1]`。
+        *   **计算口径**：`(该账号在团伙内的度数 / 团伙总人数)`，随后进行全局最大值归一化。
+        *   **解读**：分数越高，说明该账号在团伙内的连接越密集，越可能是“核心节点”。经实测核对前 10 名高分账号，最高分（1.0）出自 392 人的大团伙核心，印证了公式在极度抱团的大团伙中依然能准确识别出核心。单人孤立团伙分数为 0。
+
+# 十一、多数据集统一格式（数据组交付，2026-11）
+
+四个公开数据集（YelpChi / YelpNYC / YelpZip / FraudSquad-Amazon）加一份自建注入集，
+统一整理成**评论级**同一套 schema。生成命令、来源核验与使用条款见
+[`docs/data/provenance.md`](docs/data/provenance.md)，实测质量见
+[`results/data_quality_report.md`](results/data_quality_report.md)。
+
+## 1. 为什么是评论级
+
+账号级表（第三节）只能表达"这个号可疑"，而四个数据集的账号口径互不相同
+（Yelp 按"发过被过滤评论"、FraudSquad 按"这条评论是否由模型生成"、
+我们的注入集按"是否被注入过"）。要在同一张表上做**公平对比**，唯一稳定的公共粒度是
+**一条评论**：它天然带 user / item / rating / date / label / text，账号级特征由下游自行聚合。
+
+## 2. 交付文件
+
+| 文件 | 行数 | 说明 |
+|---|---|---|
+| `data/processed/unified/yelpchi.parquet` | 67,395 | YelpChi，**无文本** |
+| `data/processed/unified/yelpzip.parquet` | 608,458 | YelpZip，带文本 |
+| `data/processed/unified/fraudsquad_amazon.parquet` | 94,242 | 真实 86,758 + LLM 生成 7,484 |
+| `data/processed/unified/yelpchi_injected.parquet` | 70,186 | YelpChi 67,395 + 注入 2,791 |
+| `data/processed/unified/all_reviews.parquet` | 840,281 | 以上合并（用 `dataset` 列区分） |
+| `data/processed/unified/manifest.json` | — | 构建时间、原始文件 sha256、统计、官方规模对照 |
+| `results/data_quality_report.md` | — | 人读的质量报告（含"使用陷阱"） |
+
+YelpNYC 未取得（官方仅邮件申请），故无对应文件；补齐后重跑 `build` 会自动生成。
+
+## 3. 字段定义
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `dataset` | str | 数据集标识：`yelpchi` / `yelpzip` / `fraudsquad_amazon` / `yelpchi_injected` |
+| `review_id` | str | 数据集内唯一评论 ID，形如 `yelpzip-000123456`（按原始行序，稳定可复现） |
+| `global_user_id` | str | `{dataset}:{user_id}`，**跨数据集拼接时用这一列**，避免不同数据集用户 ID 撞号 |
+| `user_id` | str | 数据集原始用户 ID（统一转字符串，防止 19 位大整数丢精度） |
+| `item_id` | str | 数据集原始商品/商户 ID |
+| `rating` | float32 | 1~5 星；缺失为 NaN（**不填 0，不填均值**） |
+| `date` | datetime64 | 评论时间，**naive**（不带时区，按原始数据的本地时间存） |
+| `label` | int8 | **1 = 虚假评论，0 = 真实评论**（全数据集统一方向，见 §4） |
+| `label_source` | str | 标签怎么来的：`yelp_filter` / `real_baseline` / `llm_generated` / `human_generated` / `injected` |
+| `is_injected` | int8 | 1 = 我们 step3 人工注入的评论 |
+| `text_available` | int8 | 1 = 该数据集原本就带文本；0 = 无文本字段（当前为 YelpChi 两版） |
+| `text` | str | 评论文本；无文本时为空串（**不是 NaN**），判断有无请看 `text_available` |
+
+`label_source` 是这次新增的关键字段：它让"这个标签是平台给的、模型生成的、还是我们造出来的"
+在数据层面可区分，对比表里说明监督信号强度时直接引用它即可。
+
+## 4. 标签方向的统一规则（**最容易出错的地方**）
+
+| 原始数据 | 原始编码 | 统一后 `label` |
+|---|---|---|
+| YelpChi / YelpZip | `1` = 推荐（真实）、`-1` = 过滤（虚假） | `-1 → 1`，`1 → 0` |
+| 部分再加工版本 | `1` = 真实、`0` = 虚假 | `0 → 1`，`1 → 0` |
+| FraudSquad 真实基线 | 无标签列 | 全部 `0`，`label_source=real_baseline` |
+| FraudSquad 生成集 | 文件里 `label` 全为 1 | 全部 `1`，`label_source=llm_generated` |
+| 我们注入的评论 | `injection_log_v2.json` 的 `events_added` | 全部 `1`，`label_source=injected` |
+
+代码里的 `label_from_yelp()` 用**显式白名单**判定：遇到 `1 / -1 / 0` 之外的陌生取值直接抛
+`SchemaError`，不会把未知标签悄悄当成真实样本。历史上"标签方向反了"是最常见也最难发现的 bug，
+这里宁可让程序停下来。
+
+## 5. 数据集之间的口径差异（写论文时必须说明）
+
+| 维度 | YelpChi | YelpZip | FraudSquad-Amazon | 注入集 |
+|---|---|---|---|---|
+| 对象 | 芝加哥酒店/餐厅 | 纽约州及邻近州餐厅 | Amazon 商品（5 个类目） | 芝加哥酒店/餐厅 |
+| 假评比例 | 13.23% | 13.22% | 7.94% | 16.68% |
+| 标签来源 | 平台过滤器（near ground truth） | 同左 | 构造即真值 | 注入脚本 |
+| 时间跨度 | 2004-10 ~ 2012-10 | 2004-10 ~ 2015-01 | 2021-12 ~ 2023-01 | 2004-10 ~ 2012-10 |
+| 文本 | 无 | 有 | 有 | 无 |
+
+**推论**：跨数据集的绝对 AUC 不可直接横向比较（假评比例、领域、时间全不同），
+只能在同一数据集内比较不同方法。对比表应写出"同一数据集、同一划分、同一指标"。
+
+## 6. 三条使用纪律（血泪版）
+
+1. **不要把 `FraudSquad` 的账号当水军标签**。生成评论复用了真实账号——2,191 个发过生成评论的用户
+   **100%** 在真实基线里也有真实评论。用"发过生成评论"当账号级标签，会把正常用户判成水军。
+2. **不要用空文本跑文本模型**。YelpChi 与注入集 `text_available=0`，拿空串喂 TF-IDF 得到的分数没有意义，
+   更不能拿去和别的数据集比。
+3. **不要忽略"评分捷径"**。FraudSquad 的生成评论 100% 是 5 星，而真实评论 5 星占 69.6%。
+   任何吃评分的模型都会虚高，必须把"仅用评分"作为对照基线一起报。
+
+## 7. 读取方式
+
+```python
+import sys; sys.path.insert(0, "src")
+from data import load_dataset, load_all, list_datasets, iter_reviews
+
+list_datasets()                                  # 已构建的数据集 + 规模 + 状态
+df  = load_dataset("yelpzip")                    # 单集，按 date 升序
+df  = load_dataset("yelpzip", with_text=False)   # 不要文本（省几个 GB 内存）
+sub = load_all(["yelpchi", "yelpchi_injected"]) # 多集合并
+for batch in iter_reviews("yelpzip", batch_size=50_000):  # 60 万行级别流式处理
+    ...
+```
+
+配套校验：`python src/build_unified_data.py verify` 会比对 parquet 与 `manifest.json` 的
+sha256 与行数，防止"本地改过数据但没更新记录"。
