@@ -1,8 +1,8 @@
 {
   "feature_version": "1.0.0",
   "dataset_id": "yelpchi",
-  "built_at": "2026-11-03T13:13:05+08:00",
-  "git_commit": "286508b1e01750bf7ed4af5b67cbd13b550906ad",
+  "built_at": "2026-11-03T13:17:33+08:00",
+  "git_commit": "9fa966489f5aa0131e105a92d140322b88ecee40",
   "unified_manifest_sha256": null,
   "source_files": [
     {

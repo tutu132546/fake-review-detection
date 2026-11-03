@@ -2,5 +2,10 @@
   "dataset_id": "fraudsquad_llama3",
   "status": "blocked_by_data",
   "reason": "缺少数据集文件：C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_llama3.parquet",
-  "expected_input": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_llama3.parquet"
+  "expected_input": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_llama3.parquet",
+  "text_available": 1,
+  "label_direction": "label_direction_unverified",
+  "fake_raw_values": null,
+  "real_raw_values": null,
+  "expected_fake_rate": null
 }
