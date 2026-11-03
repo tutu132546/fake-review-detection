@@ -280,7 +280,18 @@ def build_dataset(spec: DatasetSpec, input_path=None, output_path=None,
     out = out.sort_values('global_user_id', kind='mergesort').reset_index(drop=True)
 
     logging.info(f"[{spec.dataset_id}] 4. 自检 ...")
-    qa = validate_table(out, spec, scaler, fit_df)
+    try:
+        qa = validate_table(out, spec, scaler, fit_df)
+    except ValueError as exc:
+        # 失败也留证：把真实的 schema_violations 写进 QA，避免"恒为 0"掩盖坏类型
+        qa_path = RESULTS_DIR / f'feature_qa_{spec.dataset_id}.md'
+        qa_path.write_text(
+            f"# 特征表 QA 报告：{spec.dataset_id}\n\n"
+            f"- 状态：**FAILED**（未写出特征表）\n"
+            f"- schema_violations：{len(check_schema(out))}\n\n"
+            "```\n" + "\n".join(str(exc).splitlines()[:20]) + "\n```\n",
+            encoding='utf-8')
+        raise
 
     if spec.expected_rows and len(out) != spec.expected_rows:
         raise ValueError(f"{spec.dataset_id} 行数 {len(out)} != 期望 {spec.expected_rows}")
