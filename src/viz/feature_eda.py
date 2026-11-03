@@ -43,9 +43,14 @@ COLORS = ['#4C72B0', '#DD8452', '#55A868']
 def run_eda():
     aug = pd.read_parquet(PROCESSED_DIR / "augmented_accounts_v2.parquet")
     clean = pd.read_parquet(PROCESSED_DIR / "clean_accounts.parquet")
-    with open(PROCESSED_DIR / "injection_log_v2.json", encoding="utf-8") as f:
+    log_path = PROCESSED_DIR / "injection_log_v3.json"
+    if not log_path.exists():
+        log_path = PROCESSED_DIR / "injection_log_v2.json"
+    with open(log_path, encoding="utf-8") as f:
         log = json.load(f)
     log_by = {r['user_id']: r for r in log}
+    issue3_status = {r.get('issue3_status') for r in log}
+    issue3_fixed = issue3_status == {'recomputed'}
 
     inj_mask = aug['is_injected'] == 1
     inj_ids = aug.loc[inj_mask, 'user_id']
@@ -81,7 +86,7 @@ def run_eda():
     axes[7].text(0.0, 0.97,
                  '说明\n'
                  '· burstiness 按未填充原始值绘制，\n  NaN 不参与（86.5% 账号无定义）\n'
-                 '· 建模表（feature_table.csv）以\n  中位数 0.9436 填充 + missing 标记\n'
+                 '· 建模表（data/processed/features/\n  feature_table_yelpchi.csv）以\n  中位数 0.9436 填充 + missing 标记\n'
                  '· 箱线图隐藏离群点以突出分布主体\n'
                  '· 注入组箱体整体偏离 0 即联动\n  生效；方向见判定清单',
                  va='top', fontsize=11)
@@ -131,21 +136,40 @@ def run_eda():
     chk('全模板 extreme_ratio dz>=0（其余为原本全 5 星，数值不变）',
         bool((dz['extreme_ratio_z'] >= -1e-12).all()),
         f"上升 {n_ext_up}/{len(dz)}，其余 {len(dz) - n_ext_up} 个本就全 5 星")
-    chk('全模板 active_days dz=0（未动特征）',
-        bool((dz['active_days_z'].abs() < 1e-12).all()), f"{len(dz)}/{len(dz)} 恒为 0")
+
+    dz_ac = dz[dz['template'].isin(['A', 'C'])]
+    if issue3_fixed:
+        chk('模板A/C active_days dz>=0（新增评论可能扩展活跃期）',
+            bool((dz_ac['active_days_z'] >= -1e-12).all()),
+            f"变化 {int((dz_ac['active_days_z'] > 1e-12).sum())}/{len(dz_ac)}")
+    else:
+        chk('全模板 active_days dz=0（无 review 级时间戳，未动该特征）',
+            bool((dz['active_days_z'].abs() < 1e-12).all()), f"{len(dz)}/{len(dz)} 恒为 0")
+
     for t in ['A', 'C']:
         chk(f'模板{t} max_daily_reviews dz>0',
             bool(m.loc[t, 'max_daily_reviews_z'] > 0),
             f"dz均值 {m.loc[t, 'max_daily_reviews_z']:+.3f}")
-        logging.info(f"   [描述] 模板{t} burstiness dz均值 {m.loc[t, 'burstiness_z']:+.3f} | "
-                     f"物理方向应为 dz>0（集中爆发混入近 0 间隔，波动增大）；当前 step3 实现为降低，"
-                     f"方向待修（见 data_dictionary §9 注），不作为方向性判定")
+        if issue3_fixed:
+            chk(f'模板{t} burstiness dz>0（按真实时间序列重算，方向可证伪）',
+                bool(m.loc[t, 'burstiness_z'] > 0),
+                f"dz均值 {m.loc[t, 'burstiness_z']:+.3f}")
+        else:
+            logging.info(f"   [描述] 模板{t} burstiness dz均值 {m.loc[t, 'burstiness_z']:+.3f} | "
+                         f"Issue #3 未修复（issue3_status=blocked_by_review_level_data），"
+                         f"不作方向性判定；补 review 级时间戳后恢复 dz>0 检验")
     for t in ['B', 'C']:
         chk(f'模板{t} rating_deviation dz>0',
             bool(m.loc[t, 'rating_deviation_z'] > 0),
             f"dz均值 {m.loc[t, 'rating_deviation_z']:+.3f}")
-    chk('模板B max_daily_reviews dz=0（未动特征）',
-        bool(abs(m.loc['B', 'max_daily_reviews_z']) < 1e-12), '恒为 0')
+
+    b_fixed = [r for r in log if r['injection_template'] == 'B_Rating_Polarization'
+               and 'max_daily_reviews' in r['modified_features']]
+    dz_b = dz[dz['template'] == 'B']
+    n_b_pos = int((dz_b['max_daily_reviews_z'] > 1e-12).sum())
+    chk('模板B max_daily_reviews 满足 n<=active_days*max_daily（dz>=0，且与日志补齐数一致）',
+        bool((dz_b['max_daily_reviews_z'] >= -1e-12).all() and n_b_pos == len(b_fixed)),
+        f"dz>0 {n_b_pos}/{len(dz_b)}，日志补齐 {len(b_fixed)} 个账号（Issue #6）")
     chk('模板B burstiness dz=0（未动特征）',
         bool(abs(m.loc['B', 'burstiness_z']) < 1e-12), '恒为 0')
     chk('模板A rating_deviation dz=0（未动特征）',

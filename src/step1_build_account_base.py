@@ -2,7 +2,12 @@ import pandas as pd
 import numpy as np
 import json
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import RAW_CSV_PATH, PROCESSED_DIR
+from features.temporal import calc_burstiness
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
@@ -21,14 +26,9 @@ def build_account_level_base():
     acc['active_days'] = g['date'].apply(lambda s: (s.max() - s.min()).days + 1)
     acc['daily_avg_reviews'] = acc['n_reviews'] / acc['active_days']
     acc['max_daily_reviews'] = g.apply(lambda x: x.groupby(x['date'].dt.date).size().max())
-    
-    # 【核心修复】评论 < 3 条的 burstiness 保留为 NaN，不要设为 0
-    def calc_burstiness(ts):
-        if len(ts) < 3: return np.nan 
-        ts = np.sort(ts.values)
-        gaps = np.diff(ts).astype('timedelta64[s]').astype(float)
-        return gaps.std() / gaps.mean() if gaps.mean() > 0 else np.nan
-    
+
+    # 评论 < 3 条或全部同日（间隔均值为 0）时 burstiness 保留 NaN，不设为 0；
+    # 实现统一放在 features/temporal.py，step3 复用同一函数。
     acc['burstiness'] = g['date'].apply(calc_burstiness)
     
     # 评分特征
