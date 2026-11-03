@@ -11,7 +11,7 @@
 | `fraudsquad_qwen2` | `data/processed/unified/fraudsquad_qwen2.parquet` | 同上 |
 | `fraudsquad_qwen_dsr1` | `data/processed/unified/fraudsquad_qwen_dsr1.parquet` | 同上 |
 
-统一 schema：`user_id, item_id, rating, date, label, label_source`；`label ∈ {0,1}`，`label_source ∈ {platform_filter, llm-generated, llm-generated?}`（以 `adapters.LEGAL_LABEL_SOURCES` 为准）。
+统一 schema：`user_id, item_id, rating, date, label, label_source`；`label ∈ {0,1}`，`label_source ∈ {platform_filter, real_baseline, llm_generated, injected}`（以 `adapters.LEGAL_LABEL_SOURCES` 为准）。
 
 ## 2. 四条硬断言
 

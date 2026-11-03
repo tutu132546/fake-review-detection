@@ -50,9 +50,9 @@ python src/features/build_all.py --verify-manifest
 
 ## 4. 给文本/图方法（韩婧雨、周飞奕）的接口
 
-- YelpChi 有 `text_available=1`，可做 TF-IDF / SimHash / 二部图。
-- FraudSquad 表到位后 `text_available=1`、`cohort=hijacked_llm`；`text_available=0` 的数据集必须屏蔽文本方法。
-- 账号级表不含单条评论文本，文本方法请回到 `YelpChi_reviews.csv` 按 `user_id` 关联。
+- YelpChi 的 `text_available=0`（metadata 版无正文，`YelpChi_reviews.csv` 只有 `user_id/product_id/rating/label/date`），**必须屏蔽文本/图文本方法**；账号级表也不含单条正文。
+- YelpZip 与 FraudSquad×3 的 `text_available=1`；FraudSquad 表到位后 `cohort=hijacked_llm`。
+- 二部图/社区发现只用 `user_id + item_id`，YelpChi 可回到 `data/raw/YelpChi_reviews.csv` 取边（该文件不含文本，不能做文本方法）。
 
 ## 5. 已知问题
 

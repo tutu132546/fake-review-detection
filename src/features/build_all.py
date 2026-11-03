@@ -30,6 +30,13 @@ def _write_blocked(spec, error):
         'status': 'blocked_by_data',
         'reason': str(error),
         'expected_input': str(spec.input_path) if spec.input_path else None,
+        'text_available': int(spec.text_available),
+        # B1：方向未声明时即使数据缺失也留痕，数据到位后 build_dataset 会写完整 manifest
+        'label_direction': ('declared_in_spec' if spec.label_direction_verified
+                            else 'label_direction_unverified'),
+        'fake_raw_values': list(spec.fake_raw_values) if spec.fake_raw_values else None,
+        'real_raw_values': list(spec.real_raw_values) if spec.real_raw_values else None,
+        'expected_fake_rate': spec.expected_fake_rate,
     }
     spec.manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.manifest_path, 'w', encoding='utf-8') as f:
