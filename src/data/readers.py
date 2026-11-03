@@ -261,7 +261,8 @@ def read_yelp_family(path: Path, dataset: str, *, max_rows: Optional[int] = None
 # FraudSquad（LLM 生成的水军评论 + Amazon 真实基线）
 # --------------------------------------------------------------------------
 
-def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.DataFrame:
+def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path],
+                           dataset_id: str = "fraudsquad_amazon") -> pd.DataFrame:
     """把真实基线 + 各模型生成的假评论拼成一份统一表。
 
     `generated` 形如 {"llama3_8b": path, "qwen_72b": path, ...}，键名会写进
@@ -281,7 +282,7 @@ def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.Dat
             "若是全新版本的数据，请先在此处补充字段映射。"
         )
     real = real.assign(label=0, date=_parse_dates(real["date"]))
-    frames.append(_finalize(real, "fraudsquad_amazon", label_source="real_baseline"))
+    frames.append(_finalize(real, dataset_id, label_source="real_baseline"))
 
     total_gen = 0
     for model_name, gpath in generated.items():
@@ -291,15 +292,15 @@ def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.Dat
         if missing:
             raise SchemaError(f"FraudSquad 生成集 {model_name} 缺少列 {sorted(missing)}；实际表头: {list(gen.columns)}")
         gen = gen.assign(label=1, date=_parse_dates(gen["date"]))
-        gen_frame = _finalize(gen, "fraudsquad_amazon", label_source="llm_generated")
+        gen_frame = _finalize(gen, dataset_id, label_source="llm_generated")
         logger.info("FraudSquad 生成集 %s: %d 条", model_name, len(gen_frame))
         total_gen += len(gen_frame)
         frames.append(gen_frame)
 
     out = pd.concat(frames, ignore_index=True)
     # 重新编号，保证 review_id 在全数据集内唯一
-    out["review_id"] = [f"fraudsquad_amazon-{i:09d}" for i in range(len(out))]
-    logger.info("FraudSquad 合计 %d 条（真实 %d / 生成 %d）", len(out), len(out) - total_gen, total_gen)
+    out["review_id"] = [f"{dataset_id}-{i:09d}" for i in range(len(out))]
+    logger.info("FraudSquad %s 合计 %d 条（真实 %d / 生成 %d）", dataset_id, len(out), len(out) - total_gen, total_gen)
     return coerce_dtypes(out)
 
 

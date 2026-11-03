@@ -18,6 +18,7 @@ import platform
 import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -126,25 +127,25 @@ def build_yelpnyc() -> Tuple[pd.DataFrame, List[dict], str]:
     return df, [_raw_record(path)], f"来源文件 {path.name}"
 
 
-def build_fraudsquad() -> Tuple[pd.DataFrame, List[dict], str]:
+def build_fraudsquad(dataset_id: str = "fraudsquad_amazon",
+                     only: Optional[str] = None) -> Tuple[pd.DataFrame, List[dict], str]:
+    """FraudSquad：默认合并三份生成集；A7 支持按单份生成集构建独立数据集。"""
     real_zip = RAW_FRAUDSQUAD_DIR / "amazon_2022_5core.csv.zip"
     if not real_zip.exists():
         return pd.DataFrame(), [], "未找到 amazon_2022_5core.csv.zip，请先运行 download 子命令"
 
     real_csv = readers.unzip_if_needed(real_zip, RAW_FRAUDSQUAD_DIR / "amazon", expect=".csv")
-    generated = {
-        name: p
-        for name, p in {
-            "llama3_8b": RAW_FRAUDSQUAD_DIR / "reviews_from_llama3_8b.csv",
-            "qwen_72b": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_72b.csv",
-            "qwen_dsr1": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_dsr1.csv",
-        }.items()
-        if p.exists() and p.stat().st_size > 0
+    all_generated = {
+        "llama3_8b": RAW_FRAUDSQUAD_DIR / "reviews_from_llama3_8b.csv",
+        "qwen_72b": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_72b.csv",
+        "qwen_dsr1": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_dsr1.csv",
     }
+    candidates = all_generated if only is None else {only: all_generated[only]}
+    generated = {name: p for name, p in candidates.items() if p.exists() and p.stat().st_size > 0}
     if not generated:
         return pd.DataFrame(), [], "未找到任何 LLM 生成集（reviews_from_*.csv）"
-    missing = [k for k in ("llama3_8b", "qwen_72b", "qwen_dsr1") if k not in generated]
-    df = readers.read_fraudsquad_amazon(real_csv, generated)
+    missing = [k for k in candidates if k not in generated]
+    df = readers.read_fraudsquad_amazon(real_csv, generated, dataset_id=dataset_id)
     note = f"真实基线 {real_csv.name}；生成集 {sorted(generated)}"
     if missing:
         note += f"；缺失生成集 {missing}（结果表中需如实说明）"
@@ -203,6 +204,12 @@ def build_injected() -> Tuple[pd.DataFrame, List[dict], str]:
     combined["review_id"] = [f"yelpchi_injected-{i:09d}" for i in range(len(combined))]
     combined["global_user_id"] = combined["dataset"] + ":" + combined["user_id"]
     combined = coerce_dtypes(combined)
+    # A8：行数守卫（70,186 ±2%）——v2 日志为唯一真源，重跑 step3 后应命中
+    expected_total = 70186
+    if abs(len(combined) - expected_total) / expected_total > 0.02:
+        raise ValueError(
+            f"yelpchi_injected 行数 {len(combined)} 偏离期望 {expected_total} 超过 ±2%"
+            f"（注入事件 {len(injected)} 条），先检查 injection_log_v2.json 与评论底表是否同版")
     note = (
         f"由 {log_path.name} 的 {len(log)} 个账号、{len(injected)} 条注入事件展开；"
         "注入评论无文本（step3 未生成文本），text_available=0"
@@ -215,8 +222,15 @@ BUILDERS = {
     "yelpnyc": build_yelpnyc,
     "yelpzip": build_yelpzip,
     "fraudsquad_amazon": build_fraudsquad,
+    # A7：三份生成集各自成表（共用真实基线，便于同基线公平对比）
+    "fraudsquad_llama3": partial(build_fraudsquad, dataset_id="fraudsquad_llama3", only="llama3_8b"),
+    "fraudsquad_qwen2": partial(build_fraudsquad, dataset_id="fraudsquad_qwen2", only="qwen_72b"),
+    "fraudsquad_qwen_dsr1": partial(build_fraudsquad, dataset_id="fraudsquad_qwen_dsr1", only="qwen_dsr1"),
     "yelpchi_injected": build_injected,
 }
+
+# 合并大表时排除 FraudSquad 单份生成集，避免与 fraudsquad_amazon 重复计数
+COMBINE_EXCLUDE = {"fraudsquad_llama3", "fraudsquad_qwen2", "fraudsquad_qwen_dsr1"}
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> dict:
@@ -323,7 +337,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         logger.info("%s 完成：%d 行，假评论占比 %.2f%%", name, stats["rows"], 100 * stats["fake_ratio"])
 
     if not args.no_combined:
-        manifest["combined"] = _write_combined([n for n in BUILDERS if (UNIFIED_DIR / f"{n}.parquet").exists()])
+        manifest["combined"] = _write_combined(
+            [n for n in BUILDERS if n not in COMBINE_EXCLUDE and (UNIFIED_DIR / f"{n}.parquet").exists()])
 
     with open(UNIFIED_DIR / MANIFEST_NAME, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)

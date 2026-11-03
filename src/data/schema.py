@@ -83,6 +83,34 @@ class DatasetSpec:
     extra: Dict[str, str] = field(default_factory=dict)
 
 
+def _fraudsquad_spec(name: str, display_name: str, *, single_model: Optional[str] = None) -> DatasetSpec:
+    """FraudSquad 元信息（A7）：合并视图与三个单生成集共用同一真实基线。"""
+    if single_model is None:
+        notes = ("真实基线 amazon_2022_5core + 三个模型生成的假评论合并视图；"
+                 "单份生成集另见 fraudsquad_llama3 / fraudsquad_qwen2 / fraudsquad_qwen_dsr1。")
+    else:
+        notes = (f"真实基线 amazon_2022_5core + 仅 {single_model} 生成集；"
+                 "三份生成集共用同一真实基线，便于同基线公平对比。")
+    return DatasetSpec(
+        name=name,
+        display_name=display_name,
+        homepage="https://github.com/RafaelLiuZH/FraudSquad",
+        download_page="https://github.com/RafaelLiuZH/FraudSquad/tree/main/data（官方实现仓库）",
+        citation=(
+            "Liu et al., Detecting LLM-Generated Spam Reviews by Integrating Language Model "
+            "Embeddings and Graph Neural Network (FraudSquad), 2026"
+        ),
+        license_note=(
+            "仓库未声明 LICENSE 文件；真实评论部分来自 Amazon Reviews 2023 公开数据集，"
+            "受 Amazon 数据条款约束；生成部分由作者用 Llama3-8B / Qwen 系列产出。"
+            "本项目仅作学术研究引用，不再分发原始文件。"
+        ),
+        label_semantics="真实评论 label=0（label_source=real_baseline）；生成评论 label=1（label_source=llm_generated）",
+        has_text=True,
+        notes=notes,
+    )
+
+
 DATASET_SPECS: Dict[str, DatasetSpec] = {
     "yelpchi": DatasetSpec(
         name="yelpchi",
@@ -133,24 +161,13 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
         expected_rows=608598,
         notes="覆盖纽约州及邻近州餐厅评论；镜像文件为带文本的 CSV，行数与官方公布规模做交叉核对。",
     ),
-    "fraudsquad_amazon": DatasetSpec(
-        name="fraudsquad_amazon",
-        display_name="FraudSquad-Amazon",
-        homepage="https://github.com/RafaelLiuZH/FraudSquad",
-        download_page="https://github.com/RafaelLiuZH/FraudSquad/tree/main/data（官方实现仓库）",
-        citation=(
-            "Liu et al., Detecting LLM-Generated Spam Reviews by Integrating Language Model "
-            "Embeddings and Graph Neural Network (FraudSquad), 2026"
-        ),
-        license_note=(
-            "仓库未声明 LICENSE 文件；真实评论部分来自 Amazon Reviews 2023 公开数据集，"
-            "受 Amazon 数据条款约束；生成部分由作者用 Llama3-8B / Qwen 系列产出。"
-            "本项目仅作学术研究引用，不再分发原始文件。"
-        ),
-        label_semantics="真实评论 label=0（label_source=llm_generated 的生成评论 label=1）",
-        has_text=True,
-        notes="含真实基线（amazon_2022_5core）与三个模型生成的假评论，是「大模型水军」这一步设想的实证载体。",
-    ),
+    "fraudsquad_amazon": _fraudsquad_spec("fraudsquad_amazon", "FraudSquad-Amazon（合并视图）"),
+    "fraudsquad_llama3": _fraudsquad_spec("fraudsquad_llama3", "FraudSquad-Amazon-Llama3",
+                                          single_model="llama3_8b"),
+    "fraudsquad_qwen2": _fraudsquad_spec("fraudsquad_qwen2", "FraudSquad-Amazon-Qwen2",
+                                         single_model="qwen_72b"),
+    "fraudsquad_qwen_dsr1": _fraudsquad_spec("fraudsquad_qwen_dsr1", "FraudSquad-Amazon-Qwen-DSR1",
+                                             single_model="qwen_dsr1"),
     "yelpchi_injected": DatasetSpec(
         name="yelpchi_injected",
         display_name="YelpChi + 300 注入账号（自建）",
@@ -165,7 +182,10 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
 }
 
 #: 参与统一构建的数据集（yelpchi_injected 为派生集，单独构建）
-PUBLIC_DATASETS: Sequence[str] = ("yelpchi", "yelpnyc", "yelpzip", "fraudsquad_amazon")
+PUBLIC_DATASETS: Sequence[str] = (
+    "yelpchi", "yelpnyc", "yelpzip",
+    "fraudsquad_amazon", "fraudsquad_llama3", "fraudsquad_qwen2", "fraudsquad_qwen_dsr1",
+)
 
 
 # --------------------------------------------------------------------------
