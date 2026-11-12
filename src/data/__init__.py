@@ -1,8 +1,9 @@
-"""统一数据层：把 YelpChi / YelpZip / FraudSquad-Amazon（三模型各自成表）三份公开数据
+"""统一数据层：把 YelpChi / YelpNYC / YelpZip / FraudSquad（三模型各自成表）四份公开数据
 与自建注入集合成同一套评论级 schema，供特征、检测、图方法、评估四条下游链路共用。
 
 本包只负责「原始数据 -> 统一格式」，不包含任何检测模型或特征工程逻辑。
-YelpNYC 因官方仅邮件分发且申请未获回复，如实标为缺失，见 docs/data/yelpnyc_fallback.md。
+论文口径的 6 张表（Yelp 三套 + FraudSquad 三模型）均已到位；唯一缺口是 YelpChi 无评论文本。
+数据血缘与核验过程见 docs/data/provenance.md。
 """
 
 from .schema import (
@@ -21,15 +22,14 @@ from .schema import (
     validate_accounts,
     validate_reviews,
 )
+from .readers import read_yelp_pair
 from .load import (
     iter_reviews,
     list_accounts,
     list_datasets,
-    list_derived,
     load_accounts,
     load_all,
     load_dataset,
-    load_derived,
 )
 
 __all__ = [
@@ -45,6 +45,7 @@ __all__ = [
     "build_account_table",
     "empty_reviews_frame",
     "label_from_yelp",
+    "read_yelp_pair",
     "validate_accounts",
     "validate_reviews",
     "load_dataset",
@@ -53,6 +54,4 @@ __all__ = [
     "list_datasets",
     "list_accounts",
     "iter_reviews",
-    "load_derived",
-    "list_derived",
 ]

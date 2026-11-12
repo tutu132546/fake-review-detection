@@ -112,7 +112,9 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
         expected_rows=67395,
         notes=(
             "本项目持有的 metadata.txt 为评论级 5 列（user/product/rating/label/date），"
-            "与官方公布的 67,395 条一致，但不含 reviewContent 文本文件；"
+            "与官方公布的 67,395 条 / 38,063 用户 / 201 家商户完全一致；"
+            "官方公布 13.23% 被过滤、20.33% 的用户是 spammer，本项目实测 13.2339% / 20.3321%。"
+            "该版本不含 reviewContent 文本文件，故 text_available=0；"
             "文本版需向作者邮件申请，属已知缺口，见 docs/data/provenance.md。"
         ),
     ),
@@ -127,10 +129,14 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
         has_text=True,
         expected_rows=359052,
         notes=(
-            "纽约市的餐厅（restaurant）评论，官方公布 359,052 条 / 160,264 用户 / 923 家商户，13.22% 被过滤。"
-            "注意不是酒店数据——项目早期文档误写作「酒店」，已订正。"
-            "官方发布页只提供邮件申请渠道（srayana@cs.stonybrook.edu），本项目申请未获回复，"
-            "如实标为缺失，不用其他数据顶替；备选方案见 docs/data/yelpnyc_fallback.md。"
+            "纽约市的餐厅（restaurant）评论。官方公布 359,052 条 / 160,225 用户 / 923 家商户，"
+            "10.27% 被过滤（filtered reviews）、17.79% 的用户是 spammer。"
+            "**注意 YelpNYC 的假评比例低于另两套（10.27% vs 13.23%/13.22%），不是抄错**——"
+            "这是官方页面各自公布的数值，本项目实测 10.2729% / 17.7850%，两个指标同时吻合。"
+            "注意也不是酒店数据——项目早期文档误写作「酒店」，已订正。"
+            "数据来自作者 Dropbox 共享目录的官方发布包（15-collective_opinion_spam_detection.zip），"
+            "内含 metadata（元数据）与 reviewContent（评论文本）两个文件，本项目按 "
+            "(user, item, date) 对齐后合并，对齐审计见 manifest 的 text_join_audit。"
         ),
     ),
     "yelpzip": DatasetSpec(
@@ -147,7 +153,8 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
         has_text=True,
         expected_rows=608598,
         notes=(
-            "覆盖纽约市及周边郊区的餐厅评论（官方公布 608,598 条 / 260,277 用户 / 5,044 家商户）。"
+            "覆盖纽约市及周边郊区的餐厅评论（官方公布 608,598 条 / 260,277 用户 / 5,044 家商户，"
+            "13.22% 被过滤、23.91% 的用户是 spammer；本项目实测 13.2201% / 23.9065%）。"
             "所用镜像文件共 608,598 个数据行，其中 140 行是导出残缺行（Tab 分隔、缺 rating 与 label），"
             "可用带标签记录为 608,458 条；差额已定位并写入质量报告第 2 节，不是解析丢行。"
         ),

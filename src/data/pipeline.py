@@ -29,7 +29,6 @@ from .download import download_many, sha256_of
 from .load import MANIFEST_NAME
 from .paths import (
     ACCOUNTS_DIR,
-    DERIVED_DIR,
     DOWNLOAD_CACHE_DIR,
     LEGACY_INJECTION_LOG,
     LEGACY_YELPCHI_METADATA,
@@ -97,10 +96,12 @@ def _first_existing(candidates: Sequence[Path]) -> Optional[Path]:
 
 
 def _raw_record(path: Optional[Path]) -> dict:
+    """记录一个原始文件的仓库相对路径、字节数与 sha256（路径统一用正斜杠）。"""
     if path is None or not path.exists():
         return {"path": None, "size": None, "sha256": None}
+    rel = path.relative_to(PROJECT_ROOT) if PROJECT_ROOT in path.parents else path
     return {
-        "path": str(path.relative_to(PROJECT_ROOT)) if PROJECT_ROOT in path.parents else str(path),
+        "path": Path(rel).as_posix(),
         "size": path.stat().st_size,
         "sha256": sha256_of(path),
     }
@@ -143,12 +144,39 @@ def build_yelpzip() -> Tuple[pd.DataFrame, List[dict], str]:
 
 
 def build_yelpnyc() -> Tuple[pd.DataFrame, List[dict], str]:
-    candidates = sorted(RAW_YELPNYC_DIR.glob("*.csv")) + sorted(RAW_YELPNYC_DIR.glob("*.txt"))
+    """YelpNYC：官方包把元数据与评论文本拆成两个文件，优先走双文件读取。
+
+    退回单文件分支是给第三方再加工版本留的兼容路径（那种版本通常已经把文本拼进
+    同一张表），但文件名要显式排除 README 之类的说明文件。
+    """
+    meta_path = _first_existing([RAW_YELPNYC_DIR / "metadata"])
+    content_path = _first_existing([RAW_YELPNYC_DIR / "reviewContent"])
+    if meta_path is not None and content_path is not None:
+        df = readers.read_yelp_pair(meta_path, content_path, "yelpnyc")
+        audit = dict(df.attrs.get("text_join_audit") or {})
+        df.attrs["text_join_audit"] = audit
+        note = (
+            f"来源为 Rayana 官方发布包的双文件形态：{meta_path.name}（元数据）+ "
+            f"{content_path.name}（评论文本），带完整文本"
+        )
+        if audit:
+            note += (
+                f"；文本按 (user, item, date) 对齐，策略 {audit['strategy']}，"
+                f"{audit['matched']:,}/{audit['rows_metadata']:,} 条匹配、"
+                f"{audit['key_mismatches']} 行键错位"
+            )
+        return df, [_raw_record(meta_path), _raw_record(content_path)], note
+
+    candidates = [
+        p for p in sorted(RAW_YELPNYC_DIR.glob("*.csv")) + sorted(RAW_YELPNYC_DIR.glob("*.txt"))
+        if not p.name.lower().startswith(("readme", "license", "citation"))
+        and p.name != "reviewContent"
+    ]
     path = _first_existing(candidates)
     if path is None:
         return pd.DataFrame(), [], sources.MANUAL_SOURCES["yelpnyc"]
     df = readers.read_yelp_family(path, "yelpnyc")
-    return df, [_raw_record(path)], f"来源文件 {path.name}"
+    return df, [_raw_record(path)], f"来源文件 {path.name}（单文件形态）"
 
 
 #: FraudSquad 的原始文件：真实基线 + 三个模型各自的生成集
@@ -271,6 +299,7 @@ COMBINE_EXCLUDE = frozenset(VIEW_ONLY_DATASETS)
 #: 账号级表的标签口径：每个数据集按自身构造方式给出，不用统一猜测
 ACCOUNT_LABEL_BASIS_BY_DATASET: Dict[str, str] = {
     "yelpchi": "platform_filtered",
+    "yelpnyc": "platform_filtered",
     "yelpzip": "platform_filtered",
     "fraudsquad_llama3": "hijacked_by_llm",
     "fraudsquad_qwen2": "hijacked_by_llm",
@@ -379,7 +408,9 @@ def cmd_build(args: argparse.Namespace) -> int:
             "expected_rows": expected,
             "rows_vs_expected_pct": None if not expected else round(100 * (stats["rows"] - expected) / expected, 3),
             "build_seconds": round(time.time() - t0, 1),
+            "text_available": int(stats.get("has_text_rows", 0) > 0),
             **({"partial_row_audit": df.attrs["partial_row_audit"]} if df.attrs.get("partial_row_audit") else {}),
+            **({"text_join_audit": df.attrs["text_join_audit"]} if df.attrs.get("text_join_audit") else {}),
             **extra,
         }
         logger.info("%s 完成：%d 行，假评论占比 %.2f%%", name, stats["rows"], 100 * stats["fake_ratio"])
@@ -546,6 +577,26 @@ def _caveats(name: str, path: Path, manifest: Optional[dict] = None) -> List[str
             "`text_available=0`。文本方法（TF-IDF 等）在 YelpChi 上不可运行，"
             "不能用「空文本」当输入算出结果再与其它数据集比较。"
         )
+    if name == "yelpnyc":
+        out.append(
+            "**标签为平台过滤器结果**（near ground truth）：与 YelpZip 同源，同样存在过滤算法误判，"
+            "报告中需说明这是「近真值」而非人工标注。"
+        )
+        audit = info.get("text_join_audit")
+        if audit:
+            out.append(
+                f"**元数据与文本是两个独立文件**：`metadata`（5 列，含 rating/label）与 "
+                f"`reviewContent`（4 列，含正文）各 359,052 行，靠 (user, item, date) 对齐；"
+                f"实测策略 {audit['strategy']}、匹配 {audit['matched']:,}/{audit['rows_metadata']:,}、"
+                f"键错位 {audit['key_mismatches']} 行。统一表已合并好，"
+                "下游不要自己去拼这两个文件（贴错一行是静默错误，指标上完全看不出来）。"
+            )
+        out.append(
+            "**假评比例与另两套不同，不要混用**：官方公布 YelpNYC 为 10.27%"
+            "（YelpChi 13.23% / YelpZip 13.22%），这是官方页各自公布的数值，不是抄写错误；"
+            "本项目实测 10.2729%，spammer 账号占比 17.7850%（官方 17.79%）。"
+            "**不要用 13.22% 描述 YelpNYC**。"
+        )
     if name == "yelpzip":
         out.append(
             "**标签为平台过滤器结果**（near ground truth）：Yelp 的过滤算法本身有误判，"
@@ -606,7 +657,7 @@ def cmd_qa(args: argparse.Namespace) -> int:
                 f"{DATASET_SPECS[name].expected_rows or '—'} | — |"
             )
 
-    lines.append("\n## 2. 缺失与偏差说明（如实记录）\n")
+    lines.append("\n## 2. 数据口径核对（与官方公布值逐项对照）\n")
     any_issue = False
     for name, info in manifest["datasets"].items():
         if info.get("status") != "ok":
@@ -668,41 +719,38 @@ def cmd_qa(args: argparse.Namespace) -> int:
             "账号数 260,277 与官方一致。\n"
         )
 
-    lines.append("\n## 2.2 交付清单（已到位 / 待补）\n")
-    lines.append("| 数据集 | 论文口径 | 状态 | 备注 |")
-    lines.append("|---|---|---|---|")
+    lines.append("\n### 2.2 交付清单\n")
+    lines.append("| 数据集 | 论文口径 | 状态 | 条数 | 有文本 | 备注 |")
+    lines.append("|---|---|---|---|---|---|")
     for name in PUBLIC_DATASETS:
         info = manifest["datasets"].get(name, {"status": "missing"})
         st = info.get("stats") or {}
         if info.get("status") == "ok":
-            lines.append(f"| {name} | 是 | ✅ 已构建 {st['rows']:,} 条 | {DATASET_SPECS[name].single_model or '—'} |")
+            has_text = bool(st.get("has_text_rows", 0))
+            if not has_text:
+                note = "无评论文本，文本类方法不可用"
+            else:
+                note = DATASET_SPECS[name].single_model or "—"
+            lines.append(
+                f"| {name} | 是 | ✅ | {st['rows']:,} | {'✅' if has_text else '❌'} | {note} |"
+            )
         else:
-            lines.append(f"| {name} | 是 | ⛔ 缺失 | {info.get('note', '')[:60]} |")
+            lines.append(f"| {name} | 是 | ⛔ 缺失 | — | — | {info.get('note', '')[:60]} |")
     for name in VIEW_ONLY_DATASETS:
         info = manifest["datasets"].get(name, {})
         st = info.get("stats") or {}
         if st:
-            lines.append(f"| {name} | 否（仅总览视图） | ✅ {st['rows']:,} 条 | 不进 all_reviews |")
+            lines.append(f"| {name} | 否（仅总览视图） | ✅ | {st['rows']:,} | ✅ | 不进 all_reviews |")
+    for name, info in manifest["datasets"].items():
+        if name in PUBLIC_DATASETS or name in VIEW_ONLY_DATASETS:
+            continue
+        st = info.get("stats") or {}
+        if st:
+            lines.append(
+                f"| {name} | 否（自建） | ✅ | {st['rows']:,} | "
+                f"{'✅' if st.get('has_text_rows', 0) else '❌'} | 注入实验用 |"
+            )
 
-    # 派生视图（规模对齐子样本）：单独说明，避免被当成第 4 个公开数据集
-    derived_manifest = DERIVED_DIR / "manifest.json"
-    if derived_manifest.exists():
-        with open(derived_manifest, "r", encoding="utf-8") as f:
-            dm = json.load(f)
-        lines.append("\n### 2.2.1 派生视图（**不是数据集**）\n")
-        lines.append(
-            f"| 视图 | 来源 | 目标量级 | 种子数 | 实际评论数 | 假评占比 | 用途 |\n"
-            "|---|---|---|---|---|---|---|\n"
-            f"| `{dm['view']}` | {dm['source_dataset']} | {dm['target_rows']:,} | "
-            f"{len(dm['runs'])} | {dm['rows_min']:,}~{dm['rows_max']:,} | "
-            f"{100 * dm['fake_ratio_mean']:.2f}% | YelpNYC 缺失时的规模敏感性检查 |"
-        )
-        lines.append(
-            f"\n> 该视图按商户评论数分 {dm['n_strata']} 层抽样、整商户抽取，"
-            f"实测假评占比 {100 * dm['fake_ratio_mean']:.2f}%，源表 {100 * dm['source_fake_ratio']:.2f}%，"
-            "说明抽样没有扭曲标签分布。**它只对齐评论总量，不是 YelpNYC，也不进主对比表**；"
-            "用法见 `results/" + str(dm["view"]) + ".md`。"
-        )
 
     lines.append("\n## 3. 标签来源构成（决定能否与其他论文对比）\n")
     lines.append("| 数据集 | 标签来源 | 条数 |")
@@ -897,43 +945,8 @@ def cmd_accounts(args: argparse.Namespace) -> int:
 # CLI
 # --------------------------------------------------------------------------
 
-def cmd_subsample(args: argparse.Namespace) -> int:
-    """生成 YelpZip 的「规模对齐」派生视图，用于 YelpNYC 缺失时的稳健性检查。
-
-    这对应 docs/data/yelpnyc_fallback.md 的方案 A。它只对齐评论总量这一个维度，
-    **不是 YelpNYC 的替身**；产物放在 data/processed/derived/，不进 unified，
-    也不会出现在 all_reviews 与主对比表里，避免被误当成第 4 个公开数据集。
-    """
-    from . import subsample as subsample_mod
-
-    src = UNIFIED_DIR / "yelpzip.parquet"
-    if not src.exists():
-        logger.error("缺少 %s，请先运行 build", src.relative_to(PROJECT_ROOT))
-        return 1
-
-    seeds = tuple(args.seeds) if args.seeds else subsample_mod.DEFAULT_SEEDS
-    target = int(args.target or subsample_mod.TARGET_ROWS)
-    df = pd.read_parquet(src)
-    manifest = subsample_mod.build_views(
-        df,
-        DERIVED_DIR,
-        target_rows=target,
-        seeds=seeds,
-        n_strata=args.strata,
-        with_text=not args.no_text,
-    )
-
-    report_path = RESULTS_DIR / f"{manifest['view']}.md"
-    ensure_dir(RESULTS_DIR)
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(subsample_mod.render_report(manifest))
-    logger.info("派生视图报告已写入 %s", report_path)
-    print(json.dumps({k: v for k, v in manifest.items() if k != "runs"}, ensure_ascii=False, indent=2))
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="四数据集统一数据管线")
+    p = argparse.ArgumentParser(description="公开数据集统一数据管线（Yelp 三套 + FraudSquad 三套 + 自建注入集）")
     p.add_argument("-v", "--verbose", action="store_true", help="输出调试日志")
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -955,17 +968,10 @@ def build_parser() -> argparse.ArgumentParser:
     ac.add_argument("--dataset", nargs="*", help="只处理指定数据集")
     ac.set_defaults(func=cmd_accounts)
 
-    ss = sub.add_parser("subsample", help="生成 YelpZip 规模对齐派生视图（YelpNYC 备选方案 A）")
-    ss.add_argument("--target", type=int, default=None, help="目标评论数，默认取 YelpNYC 官方规模")
-    ss.add_argument("--seeds", type=int, nargs="*", help="随机种子列表，默认 0~4")
-    ss.add_argument("--strata", type=int, default=10, help="按商户评论数分层的层数，默认 10")
-    ss.add_argument("--no-text", action="store_true", help="不写评论文本（省磁盘）")
-    ss.set_defaults(func=cmd_subsample)
-
     v = sub.add_parser("verify", help="校验产物")
     v.set_defaults(func=cmd_verify)
 
-    a = sub.add_parser("all", help="download + build + accounts + subsample + qa + verify")
+    a = sub.add_parser("all", help="download + build + accounts + qa + verify")
     a.add_argument("--force", action="store_true")
     a.set_defaults(func=None)
     return p
@@ -985,10 +991,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         rc = cmd_download(ns)
         rc = cmd_build(argparse.Namespace(dataset=None, no_combined=False)) or rc
         cmd_accounts(argparse.Namespace(dataset=None))
-        if (UNIFIED_DIR / "yelpzip.parquet").exists():
-            cmd_subsample(
-                argparse.Namespace(target=None, seeds=None, strata=10, no_text=False)
-            )
         cmd_qa(argparse.Namespace())
         cmd_verify(argparse.Namespace())
         return rc

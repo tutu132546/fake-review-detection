@@ -226,3 +226,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 工作区辅助数据（对话记忆、临时脚本），不进入仓库
+.workbuddy/
+
+# 仓库根目录下的数据集压缩包（原始数据一律放 data/raw/，已被忽略）
+/*.zip

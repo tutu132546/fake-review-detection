@@ -353,6 +353,147 @@ def read_yelp_family(
     return out
 
 
+#: Rayana 官方发布包把「元数据」与「评论文本」拆成两个文件：
+#: - `metadata`      : user \t product \t rating \t label \t date（5 列，无表头）
+#: - `reviewContent` : user \t product \t date \t text（4 列，无表头，一行一条）
+#: 两者靠 (user, product, date) 对齐。官方包里行序确实一致，但本模块不假定这一点。
+_YELP_OFFICIAL_COLUMNS = ["user_id", "item_id", "rating", "label", "date"]
+
+
+def _read_yelp_content(path: Path) -> pd.DataFrame:
+    """逐行解析 `reviewContent`。
+
+    不走通用 CSV 解析器：评论文本里含英文引号与逗号，在 QUOTE_MINIMAL 语义下
+    解析器会把后续记录吞进同一条、再抛"字段数不一致"或静默错位。这里按 Tab
+    最多切 4 段，第四段里再出现的 Tab 原样留在正文中。
+    """
+    rows: List[Tuple[str, str, str, str]] = []
+    malformed = 0
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line:
+                continue
+            parts = line.split("\t", 3)
+            if len(parts) != 4:
+                malformed += 1
+                continue
+            rows.append((parts[0], parts[1], parts[2], parts[3]))
+    if malformed:
+        logger.warning("%s: %d 行不足 4 列，已跳过", path.name, malformed)
+    if not rows:
+        raise SchemaError(f"{path.name} 未解析出任何记录")
+
+    df = pd.DataFrame(rows, columns=["user_id", "item_id", "date", "text"])
+    df.attrs["malformed_lines"] = malformed
+    return df
+
+
+def _join_key(df: pd.DataFrame, cols: Sequence[str]) -> pd.Series:
+    """把若干列拼成可比较的连接键（向量化，避免逐行 apply）。"""
+    key = df[cols[0]].astype(str)
+    for c in cols[1:]:
+        key = key.str.cat(df[c].astype(str), sep="\x1f")
+    return key
+
+
+def read_yelp_pair(
+    metadata_path: Path,
+    content_path: Path,
+    dataset: str = "yelpnyc",
+    *,
+    label_scheme: str = "auto",
+) -> pd.DataFrame:
+    """读取 Rayana 官方「metadata + reviewContent」双文件形态（YelpNYC / YelpZip 官方版）。
+
+    文本与元数据的对齐是**能静默出错**的地方：贴错一行就意味着某条评论挂着别人的
+    标签，模型学到的全是噪声，而且任何指标都看不出来。所以这里做三层校验：
+
+    1. 行数是否相等；
+    2. 逐行 (user, item, date) 是否全等；
+    3. 前两层任一不过，退回键连接并要求匹配率 ≥ 99.5%。
+
+    只有第 1、2 层都通过才按位置贴文本；否则键连接并记录未匹配 / 重复键数量。
+    匹配率不足直接抛 `SchemaError`——宁可中断，也不产出错位的数据。
+    """
+    meta = read_tabular(metadata_path, sep="\t")
+    if all(c.startswith("col_") for c in meta.columns):
+        if meta.shape[1] != 5:
+            raise SchemaError(f"{dataset} metadata 期望 5 列，实际 {meta.shape[1]} 列")
+        meta.columns = _YELP_OFFICIAL_COLUMNS
+    else:
+        meta = meta.rename(columns=map_columns(meta.columns))
+        missing = {"user_id", "item_id", "rating", "label", "date"} - set(meta.columns)
+        if missing:
+            raise SchemaError(f"{dataset} metadata 缺少列 {sorted(missing)}；实际表头: {list(meta.columns)}")
+
+    content = _read_yelp_content(content_path)
+    key = ["user_id", "item_id", "date"]
+
+    audit = {
+        "metadata_file": metadata_path.name,
+        "content_file": content_path.name,
+        "rows_metadata": int(len(meta)),
+        "rows_content": int(len(content)),
+        "malformed_content_lines": int(content.attrs.get("malformed_lines", 0)),
+        "strategy": "positional",
+        "key_mismatches": 0,
+        "matched": int(len(meta)),
+        "dropped_for_unmatched": 0,
+        "duplicate_content_keys": 0,
+    }
+
+    if len(meta) == len(content):
+        mismatch = int((_join_key(meta, key) != _join_key(content, key)).sum())
+        audit["key_mismatches"] = mismatch
+        if mismatch == 0:
+            # 行序与键都完全一致：按位置贴，最快且已逐行验证过
+            meta = meta.assign(text=content["text"].to_numpy())
+            out = _finish_yelp_pair(meta, dataset, label_scheme=label_scheme)
+            out.attrs["text_join_audit"] = audit
+            return out
+        logger.warning(
+            "%s: 行数相同但有 %d 行键不一致，改用键连接", dataset, mismatch
+        )
+
+    audit["strategy"] = "keyed_merge"
+    dup = int(content.duplicated(subset=key).sum())
+    audit["duplicate_content_keys"] = dup
+    if dup:
+        logger.warning("%s: reviewContent 有 %d 个重复键，键连接时保留首条", dataset, dup)
+
+    merged = meta.merge(
+        content.drop_duplicates(subset=key, keep="first"),
+        on=key,
+        how="left",
+        indicator=True,
+        validate="many_to_one",
+    )
+    matched = int((merged["_merge"] == "both").sum())
+    audit["matched"] = matched
+    audit["dropped_for_unmatched"] = int(len(merged) - matched)
+    ratio = matched / max(len(merged), 1)
+    if ratio < 0.995:
+        raise SchemaError(
+            f"{dataset}: metadata 与 reviewContent 仅 {ratio:.2%} 的记录能按 "
+            f"(user, item, date) 对上（{matched:,}/{len(merged):,}），"
+            "疑似两个文件不是同一版本，拒绝生成可能错位的文本"
+        )
+    merged = merged.drop(columns=["_merge"])
+
+    out = _finish_yelp_pair(merged, dataset, label_scheme=label_scheme)
+    out.attrs["text_join_audit"] = audit
+    return out
+
+
+def _finish_yelp_pair(df: pd.DataFrame, dataset: str, *, label_scheme: str) -> pd.DataFrame:
+    df = df.assign(
+        date=_parse_dates(df["date"]),
+        label=label_from_yelp(df["label"], scheme=label_scheme, context=dataset),
+    )
+    return _finalize(df, dataset, label_source="yelp_filter", text_available=True)
+
+
 # --------------------------------------------------------------------------
 # FraudSquad（LLM 生成的水军评论 + Amazon 真实基线）
 # --------------------------------------------------------------------------

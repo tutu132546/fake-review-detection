@@ -88,7 +88,8 @@ FILES: Dict[str, List[RemoteFile]] = {
     # 带评论文本的完整版只能走官方邮件申请渠道，不做静默替代。
     "yelpchi": [],
 
-    # YelpNYC：官方仅邮件发布；申请未获回复，构建阶段标记为缺失，见 yelpnyc_fallback.md
+    # YelpNYC：来自作者 Dropbox 发布包（不在脚本下载清单内），
+    # 需手工把 metadata 与 reviewContent 放进 data/raw/yelpnyc/，见 provenance.md §2.2
     "yelpnyc": [],
 
     "yelpzip": [
@@ -219,10 +220,13 @@ MANUAL_SOURCES: Dict[str, str] = {
         "该版本不含评论文本，故 text_available=0；文本版申请未获回复，缺口见 provenance.md。"
     ),
     "yelpnyc": (
-        "官方页 https://shebuti.com/yelpnyc-dataset/ 只提供邮件申请，无直链；"
-        "本项目 2026-11-02 发信申请，未获回复；官方页面链接的 Dropbox 共享目录在本机网络下"
-        "不可达（DNS 污染）。按「拿不到就如实标缺失、不拿别的数据顶替」处理，"
-        "替代方案见 docs/data/yelpnyc_fallback.md。"
+        "**已取得**。官方页 https://shebuti.com/yelpnyc-dataset/ 只提供邮件申请；邮件未获回复后，"
+        "改用官方页链接的作者 Dropbox 共享目录 "
+        "https://www.dropbox.com/sh/iqcuj0363zcj3go/AAAvbZVR_PSNyJX8AXUXpBqea?dl=0 ，"
+        "下载到发布包 15-collective_opinion_spam_detection.zip（sha256 "
+        "f16f20032a8efe9c456a470037b14c3d3c1d5498ef5dab9321c82ecc65fa6a5e），"
+        "内含 metadata 与 reviewContent 两个文件，需手工放入 data/raw/yelpnyc/。"
+        "该包同时带 SpEagle 的 MATLAB 代码与 SentiWordNet 词表，本项目只用其中两个数据文件。"
     ),
 }
 

@@ -158,9 +158,10 @@ v3.0 实测（2026-10-24）：9 项 PASS + 3 项由硬判据降级为观测项�
 
 # 十一、多数据集统一格式（数据组交付，2026-11）
 
-现有公开数据整理成**评论级**同一套 schema：YelpChi、YelpZip、FraudSquad 的三个单模型数据集，
-外加一份自建注入集。YelpNYC 因官方仅邮件分发、申请未获回复而**缺失**，处理方案见
-[`docs/data/yelpnyc_fallback.md`](docs/data/yelpnyc_fallback.md)。
+现有公开数据整理成**评论级**同一套 schema：YelpChi、**YelpNYC**、YelpZip、FraudSquad 的三个
+单模型数据集，外加一份自建注入集——**论文口径的 6 张表全部到位，没有缺失数据集**。
+唯一剩余的数据缺口是 YelpChi 缺评论文本（持有的 `metadata` 版本不含 `reviewContent`），
+影响面仅为「文本类方法不能在 YelpChi 上跑」。
 生成命令、来源核验与使用条款见 [`docs/data/provenance.md`](docs/data/provenance.md)，
 实测质量见 [`results/data_quality_report.md`](results/data_quality_report.md)。
 
@@ -181,39 +182,27 @@ v3.0 实测（2026-10-24）：9 项 PASS + 3 项由硬判据降级为观测项�
 | 文件 | 行数 | 说明 |
 |---|---|---|
 | `data/processed/unified/yelpchi.parquet` | 67,395 | YelpChi，**无文本** |
-| `data/processed/unified/yelpzip.parquet` | 608,458 | YelpZip，带文本（另有 140 行导出残缺不可用，见 §5） |
+| `data/processed/unified/yelpnyc.parquet` | 359,052 | YelpNYC，带文本（官方 `metadata` + `reviewContent` 双文件按 `(user, item, date)` 合并） |
+| `data/processed/unified/yelpzip.parquet` | 608,458 | YelpZip，带文本（另有 140 行导出残缺不可用，见 §5.1） |
 | `data/processed/unified/fraudsquad_llama3.parquet` | 89,247 | 真实 86,758 + Llama3-8B 生成 2,489 |
 | `data/processed/unified/fraudsquad_qwen2.parquet` | 89,253 | 真实 86,758 + Qwen-72B 生成 2,495 |
 | `data/processed/unified/fraudsquad_qwen_dsr1.parquet` | 89,258 | 真实 86,758 + Qwen-DSR1 生成 2,500 |
 | `data/processed/unified/fraudsquad_amazon.parquet` | 94,242 | **合并视图，仅供总览**，不作对比基准 |
 | `data/processed/unified/yelpchi_injected.parquet` | 70,186 | YelpChi 67,395 + 注入 2,791 |
-| `data/processed/unified/all_reviews.parquet` | 1,013,797 | 除合并视图外的 6 张表合并（`dataset` 列区分） |
-| `data/processed/accounts/<dataset>.parquet` | 见 §6 | 账号级表，7 个数据集各一份 |
-| `data/processed/derived/yelpzip_scale359k_seed{0..4}.parquet` | 各约 35.98 万 | **派生视图**（非数据集）：YelpZip 按商户分层抽到 YelpNYC 量级，只做规模敏感性检查，见 §2.1 |
-| `data/processed/unified/manifest.json` | — | 构建时间、原始文件 sha256、统计、官方规模对照、YelpZip 残缺行审计 |
+| `data/processed/unified/all_reviews.parquet` | 1,372,849 | 除合并视图外的 7 张表合并（`dataset` 列区分） |
+| `data/processed/accounts/<dataset>.parquet` | 见 §6 | 账号级表，8 个数据集各一份 |
+| `data/processed/unified/manifest.json` | — | 构建时间、原始文件 sha256、统计、官方规模对照、文本对齐与残缺行审计 |
 | `results/data_quality_report.md` | — | 人读的质量报告（含"使用陷阱"与差额对账） |
 
 > ⚠️ `all_reviews.parquet` 里 **86,758 条真实基线出现三次**（三张单模型表各带一份，这是"同基线公平对比"
 > 的必然结果）。要统计"真实评论总量"请不要直接用这张大表，按 `dataset` 分开算。
 > 合并视图 `fraudsquad_amazon` 已排除在外，否则会重复第四次。
 
-### 2.1 派生视图不算数据集
-
-`derived/` 下的表是**从 YelpZip 抽样得到的派生视图**，用途单一：YelpNYC 未取得时，
-回答"评论总量降到 36 万量级时方法是否还稳"。三条纪律：
-
-1. **不进主对比表**，不占"第 4 个公开数据集"的名额——它和 YelpZip 是同一份数据，不是独立证据；
-2. **不许称它为 YelpNYC**：它只对齐评论总量（359,052 条），商户数是 2,971~3,002 家，
-   而 YelpNYC 是 923 家；城市覆盖、时间跨度也都不同；
-3. 报告结果时给 **5 个种子的均值与区间**，不要只报一个种子——种子的作用就是把抽样噪声显式化。
-
-生成命令 `python src/build_unified_data.py subsample`，实测数字见 `results/yelpzip_scale359k.md`。
-
 ## 3. 字段定义（评论级）
 
 | 列 | 类型 | 说明 |
 |---|---|---|
-| `dataset` | str | 数据集标识：`yelpchi` / `yelpzip` / `fraudsquad_llama3` / `fraudsquad_qwen2` / `fraudsquad_qwen_dsr1` / `fraudsquad_amazon` / `yelpchi_injected` |
+| `dataset` | str | 数据集标识：`yelpchi` / `yelpnyc` / `yelpzip` / `fraudsquad_llama3` / `fraudsquad_qwen2` / `fraudsquad_qwen_dsr1` / `fraudsquad_amazon` / `yelpchi_injected` |
 | `review_id` | str | 数据集内唯一评论 ID，形如 `yelpzip-000123456`（按原始行序，稳定可复现） |
 | `global_user_id` | str | `{dataset}:{user_id}`，**跨数据集拼接时用这一列**，避免不同数据集用户 ID 撞号 |
 | `user_id` | str | 数据集原始用户 ID（统一转字符串，防止 19 位大整数丢精度） |
@@ -250,19 +239,30 @@ v3.0 实测（2026-10-24）：9 项 PASS + 3 项由硬判据降级为观测项�
 
 ## 5. 数据集之间的口径差异（写论文时必须说明）
 
-| 维度 | YelpChi | YelpZip | FraudSquad ×3（单模型） | 注入集 |
-|---|---|---|---|---|
-| 对象 | 芝加哥酒店/餐厅 | 纽约市及周边郊区餐厅 | Amazon 商品（5 个类目） | 芝加哥酒店/餐厅 |
-| 假评比例 | 13.23% | 13.22% | 2.79% / 2.80% / 2.80% | 16.68% |
-| 标签来源 | 平台过滤器（near ground truth） | 同左 | 构造即真值 | 注入脚本 |
-| 账号结构 | 38,063 用户 | 260,239 用户 | 8,092 账号，其中 1,250 被接管 | 38,063 用户，300 被注入 |
-| 时间跨度 | 2004-10 ~ 2012-10 | 2004-10 ~ 2015-01 | 2021-12 ~ 2023-01 | 2004-10 ~ 2012-10 |
-| 文本 | 无 | 有 | 有 | 无 |
+| 维度 | YelpChi | YelpNYC | YelpZip | FraudSquad ×3（单模型） | 注入集 |
+|---|---|---|---|---|---|
+| 对象 | 芝加哥酒店/餐厅 | 纽约市餐厅 | 纽约市及周边郊区餐厅 | Amazon 商品（5 个类目） | 芝加哥酒店/餐厅 |
+| 评论数 | 67,395 | 359,052 | 608,458 | 86,758 + 2,489~2,500 | 70,186 |
+| 商户/商品数 | 201 | 923 | 5,044 | 7,617 | 201 |
+| 假评比例 | 13.23% | **10.27%** | 13.22% | 2.79% / 2.80% / 2.80% | 16.68% |
+| spammer 账号占比 | 20.33% | **17.79%** | 23.91% | 1,250 / 8,092 = 15.45% | 300 / 38,063 = 0.79% |
+| 标签来源 | 平台过滤器（near ground truth） | 同左 | 同左 | 构造即真值 | 注入脚本 |
+| 账号结构 | 38,063 用户 | 160,225 用户 | 260,239 用户（官方 260,277） | 8,092 账号，其中 1,250 被接管 | 38,063 用户，300 被注入 |
+| 时间跨度 | 2004-10 ~ 2012-10 | 2004-10 ~ 2015-01 | 2004-10 ~ 2015-01 | 2021-12 ~ 2023-01 | 2004-10 ~ 2012-10 |
+| 文本 | 无 | 有 | 有 | 有 | 无 |
 
 **推论**：跨数据集的绝对 AUC 不可直接横向比较（假评比例、领域、时间全不同），
 只能在同一数据集内比较不同方法。对比表应写出"同一数据集、同一划分、同一指标"。
-另外三张 FraudSquad 表共用同一批 1,250 个被接管账号与同一份真实基线，
-跨模型比较是**配对比较**，不能当独立样本做显著性检验。
+
+关于三张 FraudSquad 表的可比性，**不要笼统说"共用同一批账号"**（实测不是）：
+
+| 比较 | 账号是否同一批 | 真实基线是否同一份 | 结论 |
+|---|---|---|---|
+| llama3 vs qwen2 | ✅ 完全相同（各 1,250，集合相等） | ✅ 同一份 86,758 | **严格配对比较**，可做配对检验 |
+| llama3/qwen2 vs qwen_dsr1 | ❌ 另一批（交集仅 309，三者并集 2,191） | ✅ 同一份 86,758 | 同时换了账号与模型，**不能当配对比较** |
+
+> 上表由 `results/data_quality_report.md` §5 的账号集合关系段实时算出，
+> 换数据版本后请以报告为准。
 
 ### 5.1 YelpZip 的 140 行缺口（已查清）
 
@@ -324,7 +324,7 @@ import sys; sys.path.insert(0, "src")
 from data import (load_dataset, load_all, load_accounts, list_datasets,
                   list_accounts, iter_reviews)
 
-list_datasets()                                     # 数据集 + 规模 + role（paper/view/derived）
+list_datasets()                                     # 数据集 + 规模 + role（paper/view/self_built）
 df  = load_dataset("fraudsquad_llama3")             # 单集，按 date 升序
 df  = load_dataset("yelpzip", with_text=False)      # 不要文本（省几个 GB 内存）
 sub = load_all(["yelpchi", "yelpchi_injected"])     # 多集合并

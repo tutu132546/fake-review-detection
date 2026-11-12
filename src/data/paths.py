@@ -31,8 +31,6 @@ UNIFIED_DIR: Path = PROCESSED_DIR / "unified"
 # 账号级视图输出目录（从 unified 评论级表聚合得到）
 ACCOUNTS_DIR: Path = PROCESSED_DIR / "accounts"
 
-# 派生视图输出目录（规模对齐子样本等，只用于稳健性检查，不进入主对比表）
-DERIVED_DIR: Path = PROCESSED_DIR / "derived"
 
 # ---- 历史文件（保持不动，兼容 step0~step3 与 B/C/D 的既有脚本）----
 LEGACY_YELPCHI_METADATA: Path = RAW_DIR / "metadata.txt"

@@ -20,7 +20,7 @@ from typing import Iterable, Iterator, List, Optional, Sequence
 
 import pandas as pd
 
-from .paths import ACCOUNTS_DIR, DERIVED_DIR, UNIFIED_DIR
+from .paths import ACCOUNTS_DIR, UNIFIED_DIR
 from .schema import ACCOUNT_COLUMNS, CANONICAL_COLUMNS, DATASET_SPECS
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def list_datasets() -> pd.DataFrame:
     """列出数据集及其规模/标签分布，供队友一眼确认"我该读哪个"。
 
     `role` 列区分用途：`paper` = 论文口径的独立数据集；`view` = 只作总览的合并视图
-    （不要拿去做对比实验）；`derived` = 自建派生集。
+    （不要拿去做对比实验）；`self_built` = 本项目自建的注入数据集。
     """
     from .schema import PUBLIC_DATASETS, VIEW_ONLY_DATASETS
 
@@ -68,7 +68,7 @@ def list_datasets() -> pd.DataFrame:
         elif name in PUBLIC_DATASETS:
             role = "paper"
         else:
-            role = "derived"
+            role = "self_built"
         rows.append(
             {
                 "dataset": name,
@@ -168,33 +168,3 @@ def list_accounts() -> pd.DataFrame:
     manifest = read_manifest()
     rows = (manifest.get("accounts") or [])
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["dataset", "accounts", "positive_accounts"])
-
-
-# --------------------------------------------------------------------------
-# 派生视图（规模对齐子样本）
-# --------------------------------------------------------------------------
-
-def load_derived(view: str = "yelpzip_scale359k", seed: int = 0) -> pd.DataFrame:
-    """读取派生视图（`build_unified_data.py subsample` 产出）。
-
-    **它不是独立数据集**：只是 YelpZip 的一个规模对齐子样本，用于 YelpNYC 缺失时的
-    规模敏感性检查。用它跑稳健性实验时请遍历全部种子并报告均值与区间，
-    不要把单个种子的结果写进主对比表。
-    """
-    path = DERIVED_DIR / f"{view}_seed{seed}.parquet"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"派生视图不存在：{path}\n请先运行 `python src/build_unified_data.py subsample`。"
-        )
-    return pd.read_parquet(path)
-
-
-def list_derived() -> pd.DataFrame:
-    """列出已生成的派生视图（每个种子一行）。"""
-    p = DERIVED_DIR / "manifest.json"
-    if not p.exists():
-        return pd.DataFrame(columns=["view", "seed", "rows", "items", "users", "fake_ratio"])
-    with open(p, "r", encoding="utf-8") as f:
-        m = json.load(f)
-    rows = [{"view": m["view"], **r} for r in m.get("runs", [])]
-    return pd.DataFrame(rows)
