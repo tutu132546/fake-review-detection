@@ -1,0 +1,4 @@
+dataset,selected,valid,top1,direction,mean_cos,partial_truth
+fraudsquad_llama3,20,19,4,6,0.2765323964722303,2
+fraudsquad_qwen2,20,17,4,7,0.3623658889618849,0
+fraudsquad_qwen_dsr1,20,17,2,3,0.14510553829817252,0

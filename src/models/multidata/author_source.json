@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/tommasoamico/DCFO",
+  "sha256": {
+    "lof.py": "99c1bd196cd76ba80a3629fac892864083641c89038689ed53d51f796ef316f1",
+    "utilityFunctions.py": "7d76fa25c66be8ffd9bf8359fdabad1b4f00130aaef97a6f9506b4c57190a3c7",
+    "optimizationLofProper.py": "34a4f32521e3600ddf61a50ba7d805c12ddd6a8935df658bb4a32022a4346597"
+  },
+  "scope": "Numeric Euclidean demo only; optimizer class unchanged; customLOF runtime typecheck decorators removed; optional dependencies excluded."
+}
