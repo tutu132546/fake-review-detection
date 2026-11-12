@@ -24,3 +24,5 @@ python src/models/multidata/validate.py
 ~~~
 
 detect 使用已交付 scaler 对应的 _z 列，未重新 fit scaler。explain 每模型版本单独选前20；混合拟合LOF，以该版本未被接管账号分数的95%分位作为门槛。解释限于评论数>=3且爆发性可计算的人群，和检测性能表的人群不同。没有沿用10月YelpChi阈值。3个子进程并行，每账号45秒墙钟限制，包含解释器启动与独立复算；不同机器超时数可能不同。只把通过独立复算的连续向量用于解释对照；所有失败/超时保留分母。账号级分数和中间产物写入 C_RUN_DIR。提交只包含聚合结果。
+
+复现含 YelpNYC 的完整检测表时，在上述命令前设置环境变量 C_NYC_DIR，指向杨补发的文件夹（含 feature_table_yelpnyc.csv、feature_table_yelpnyc.json、scaler_yelpnyc.json）。detect.py 默认依次处理全部六张表。只补跑纽约时，用独立的 C_RUN_DIR 执行 python src/models/multidata/detect.py yelpnyc，再按 dataset、method 合并结果。输入 CSV 按原始字节校验；scaler 清单使用 Windows 换行，交接版可还原换行后校验。

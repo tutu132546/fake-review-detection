@@ -11,5 +11,8 @@ jobs=json.loads((D/'targets.json').read_text())
 for ds in sorted(set(j['ds'] for j in jobs)):
  f,x=data(ds);js=[j for j in jobs if j['ds']==ds];assert len(js)==20
  for j in js:assert f.iloc[j['i']].user_id==j['uid'] and f.iloc[j['i']].cohort=='hijacked_llm' and j['before']>j['threshold']
-d=pd.read_csv(D/'detection.csv');assert len(d)==15 and (d.lo<=d.auc).all() and (d.hi>=d.auc).all()
-print('PASS: DBSCAN duplicates/noise, target identities and threshold, 15 AUC intervals')
+d=pd.read_csv(D/'detection.csv');expected={'yelpchi','yelpzip','fraudsquad_llama3','fraudsquad_qwen2','fraudsquad_qwen_dsr1'}
+import os
+if os.environ.get('C_NYC_DIR'): expected.add('yelpnyc')
+assert set(d.dataset)==expected and (d.groupby('dataset').method.nunique()==3).all() and len(d)==3*len(expected) and (d.lo<=d.auc).all() and (d.hi>=d.auc).all()
+print('PASS: DBSCAN duplicates/noise, target identities and threshold, dataset coverage and AUC intervals')
