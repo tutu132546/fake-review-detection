@@ -175,6 +175,7 @@
 ### yelpchi
 
 - **该版本无评论文本**：metadata 版只含 user/product/rating/label/date，`text_available=0`。文本方法（TF-IDF 等）在 YelpChi 上不可运行，不能用「空文本」当输入算出结果再与其它数据集比较。
+- **第三方镜像已排查，补不上文本**：科学数据银行的「Yelp dataset」发布包（dataset.zip，MD5 7c6c35041c4eabb65aa024f2f1ecff74）里与 YelpChi 相关的只有一个 `YelpChi.mat`，经解析是 CARE-GNN（Dou et al., CIKM 2020）的基准子集：45,954 条评论、32 维特征、3 张关系图（net_rur/net_rtr/net_rsr）、label 含 6,677 条正例（14.53%），**不含任何评论文本**，且比官方 67,395 条少 21,441 条。它不能用来补 YelpChi 的文本缺口，也不能当 YelpChi 的替代版本使用。
 
 ### yelpnyc
 
@@ -186,6 +187,7 @@
 
 - **标签为平台过滤器结果**（near ground truth）：Yelp 的过滤算法本身有误判，这是所有使用该数据集的论文的共同前提，报告中需说明。
 - **镜像文件有 140 行导出残缺**：这些行只有 `user / product / date / text` 四列，缺 rating 与 label，会被前一条未闭合引号的记录吞进正文。读取阶段已剥离（18 条正常记录的正文恢复干净），但残缺行本身无标签、无法使用：涉及 139 个账号，其中 38 个只出现在残缺行，在 YelpZip 上做账号级实验时这部分账号缺位（占账号总数 0.015%）。补齐需要官方原版文件，见 docs/data/provenance.md §3。
+- **这 140 行残缺是流通文件自带的，不是本项目造成的**：本项目使用的 yelpzip.csv（410,865,364 字节，sha256 78f92e83…517fe）与科学数据银行 dataset.zip 内的同名文件**sha256 完全相同**；两个不同来源的镜像给出同一份字节，说明残缺来自这份导出文件本身，与本项目的下载与解析无关。
 
 ### fraudsquad_llama3
 

@@ -78,6 +78,9 @@ OFFICIAL_GIT_BLOBS: Dict[str, str] = {
 #: 佐证（见 results/data_quality_report.md 第 2 节：608,598 行、5,044 商户、用户并集
 #: 与官方公布的 260,277 完全一致）。sha256 在此固定下来，用于发现"换了一次镜像、
 #: 内容变了"的情况——它是本项目的**版本指纹**，不等于官方发布的摘要。
+#: 佐证 2：科学数据银行「Yelp dataset」（dataset.zip，MD5 7c6c35041c4eabb65aa024f2f1ecff74）
+#: 内含的 yelpzip.csv 与本文件 sha256 完全相同 —— 两个不同来源的镜像字节一致，
+#: 说明文件里的 140 行残缺是这份流通导出自带的，不是本项目下载或解析引入的。
 _YELPZIP_MIRROR_SHA256 = "78f92e83574208f896328c5db99ac3d18644bb34eb457054bda235b2a8e517fe"
 _YELPZIP_MIRROR_SIZE = 410_865_364
 

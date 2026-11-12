@@ -23,6 +23,11 @@
 唯一剩余缺口是 **YelpChi 缺评论文本**（持的是 `metadata` 版本，无 `reviewContent`），
 影响面仅为「文本类方法不能在 YelpChi 上跑」，图方法与元数据方法不受影响。
 
+> 这个缺口已做过外部排查（2026-11-12）：科学数据银行的「Yelp dataset」发布包里，
+> YelpChi 只以一个 `YelpChi.mat` 出现——那是 CARE-GNN 的 45,954 条基准子集，
+> **不含文本**；包内的 `yelpzip.csv` 与本项目文件 sha256 完全相同，`YelpNYC.zip`
+> 只是官方数据的 Excel 重排。**结论：没有可用的替代来源**，明细见 provenance §2.6。
+
 ### 1.1 YelpNYC 是怎么拿到的、凭什么说它对
 
 - 官方页只给邮件申请渠道，发信未获回复；改从官方页 "here" 链接指向的**作者 Dropbox 共享目录**
@@ -96,4 +101,4 @@ python src/build_unified_data.py verify        # 产物与 manifest 一致性校
 
 | 事项 | 阻塞谁 | 现状 |
 |---|---|---|
-| YelpChi 带文本版 | 周飞奕的 TF-IDF 在 YelpChi 上跑不了 | 邮件申请未回复；已在数据里用 `text_available=0` 标死，其余数据集都有文本，基线实验不受影响 |
+| YelpChi 带文本版 | 周飞奕的 TF-IDF 在 YelpChi 上跑不了 | 邮件申请未回复；**已排查科学数据银行镜像，其中 YelpChi 只有 CARE-GNN 的 45,954 条 `.mat`、无文本**（provenance §2.6）。已在数据里用 `text_available=0` 标死，其余数据集都有文本，基线实验不受影响 |
