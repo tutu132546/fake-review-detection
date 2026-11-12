@@ -4,7 +4,7 @@
 所有模型均在人群内重新拟合和评价；不是全体模型的切片评估，也不是独立测试。没有删除人群内的重复账号、没有加噪声、没有翻转分数或选择最优k。
 三个人群改变了样本组成与邻居背景，因此跨人群指标差异不能直接称为算法提升。
 
-输入 SHA256：`0051cdd29478d119a54440194ac4c61093a7692a99b20f832093e66c0446f39f`
+输入 SHA256：`9b39675b006464e8a6126863aa56091040a6fdb6a7638feec56fe26828e897de`
 
 native：全部未注入账号；native_ge3：未注入且评论数≥3；native_ge3_observed：再要求burstiness_missing=0。
 最后一组保留原8列接口，其缺失标记恒为0，不重新标准化。
@@ -56,7 +56,7 @@ native：全部未注入账号；native_ge3：未注入且评论数≥3；native
 
 ## 复现环境与局限
 
-Python 3.13.7; numpy=2.2.6, pandas=2.3.3, scipy=1.16.2, scikit-learn=1.7.2
+Python 3.14.5; numpy=2.5.1, pandas=3.0.5, scipy=1.18.1, scikit-learn=1.9.1
 运行：python src/models/cohort_analysis.py --input data/processed/feature_table.csv
 明细与完整JSON保存在忽略目录data/processed/c_cohorts，不提交账号ID。原PR #4报告保持不变。
 同分按账号ID升序；P@50并列范围也已报告。固定分数的条件bootstrap区间、lift及更新画像见 [PR #5补充报告](c_cohort_uncertainty.md)，由cohort_uncertainty.py另行生成；尚未做独立样本验证。

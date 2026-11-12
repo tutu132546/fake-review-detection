@@ -1,0 +1,88 @@
+{
+  "feature_version": "1.0.0",
+  "dataset_id": "yelpchi",
+  "built_at": "2026-11-03T18:57:47+08:00",
+  "git_commit": "3c82a2bda77290e3647e27eaf31e67c0143b3253",
+  "unified_manifest_sha256": null,
+  "source_files": [
+    {
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\augmented_accounts_v2.parquet",
+      "sha256": "ff6a3d26e053daef5fa9ec7eb07cd9446f03b0196bbab4d8e9748da09f1dca49",
+      "rows": 38063
+    },
+    {
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\clean_accounts.parquet",
+      "sha256": "1f3da4b46dfb62d684a792201743c2218d71ed32c9f1a6d3bd32d11dfa60fb0d",
+      "rows": 38063
+    },
+    {
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\injection_log_v2.json",
+      "sha256": "28a923a5265715682485bc4c425d9c67169c0c609e37e3dbf1013aa50b08ce91",
+      "rows": 300
+    }
+  ],
+  "rows": 38063,
+  "accounts": 38063,
+  "label_counts": {
+    "0": 30024,
+    "1": 8039
+  },
+  "cohort_counts": {
+    "native": 37763,
+    "self_injected": 300
+  },
+  "text_available": 0,
+  "feature_list": [
+    "n_reviews",
+    "active_days",
+    "daily_avg_reviews",
+    "max_daily_reviews",
+    "burstiness",
+    "rating_deviation",
+    "extreme_ratio"
+  ],
+  "scaler": {
+    "path": "data/processed/features/scaler_yelpchi.json",
+    "sha256": "d8fb018237c783df0b8d6ce0ac778e830af2a9dfb1604017ab6abb2cac0523ee",
+    "fit_population": "clean_native"
+  },
+  "missing_rates": {
+    "n_reviews": 0.0,
+    "active_days": 0.0,
+    "daily_avg_reviews": 0.0,
+    "max_daily_reviews": 0.0,
+    "burstiness": 0.8648,
+    "rating_deviation": 0.0,
+    "extreme_ratio": 0.0
+  },
+  "label_encoding_check": "passed",
+  "qa": {
+    "schema_violations": 0,
+    "constraint_violations": 0,
+    "nan_feature_cells": 0,
+    "daily_avg_max_abs_diff": 0.0,
+    "z_mean_max_abs": 0.0,
+    "z_std_max_dev": 0.0,
+    "degenerate_features": [],
+    "rows": 38063
+  },
+  "known_issues": [],
+  "env": {
+    "python": "3.14.5",
+    "pandas": "3.0.5",
+    "numpy": "2.5.1",
+    "scikit_learn": "1.9.1",
+    "PYTHONHASHSEED": "0"
+  },
+  "python": "C:\\Users\\31039\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+  "table": {
+    "path": "data/processed/features/feature_table_yelpchi.csv",
+    "sha256": "9b39675b006464e8a6126863aa56091040a6fdb6a7638feec56fe26828e897de"
+  },
+  "source_dataset": "yelpchi_injected",
+  "injection_log": {
+    "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\injection_log_v2.json",
+    "sha256": "28a923a5265715682485bc4c425d9c67169c0c609e37e3dbf1013aa50b08ce91",
+    "rows": 300
+  }
+}

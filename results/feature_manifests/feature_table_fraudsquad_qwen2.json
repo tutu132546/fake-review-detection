@@ -1,0 +1,76 @@
+{
+  "feature_version": "1.0.0",
+  "dataset_id": "fraudsquad_qwen2",
+  "built_at": "2026-11-03T19:02:14+08:00",
+  "git_commit": "3c82a2bda77290e3647e27eaf31e67c0143b3253",
+  "unified_manifest_sha256": "0d089346592857a74bb109f92ef60e3ea617febe6cbbd7979dc0041cf8e68ccd",
+  "source_files": [
+    {
+      "path": "C:\\Users\\31039\\Desktop\\work\\挖掘机\\fake-review-detection\\data\\processed\\unified\\fraudsquad_qwen2.parquet",
+      "sha256": "0d089346592857a74bb109f92ef60e3ea617febe6cbbd7979dc0041cf8e68ccd",
+      "rows": 89253
+    }
+  ],
+  "rows": 8092,
+  "accounts": 8092,
+  "label_counts": {
+    "0": 6842,
+    "1": 1250
+  },
+  "cohort_counts": {
+    "native": 6842,
+    "hijacked_llm": 1250
+  },
+  "text_available": 1,
+  "feature_list": [
+    "n_reviews",
+    "active_days",
+    "daily_avg_reviews",
+    "max_daily_reviews",
+    "burstiness",
+    "rating_deviation",
+    "extreme_ratio"
+  ],
+  "scaler": {
+    "path": "data/processed/features/scaler_fraudsquad_qwen2.json",
+    "sha256": "b6de17dc8d11ad25d13d377a09522eb01e1aa3d3808b3b1745c62ec997309eef",
+    "fit_population": "all_accounts"
+  },
+  "missing_rates": {
+    "n_reviews": 0.0,
+    "active_days": 0.0,
+    "daily_avg_reviews": 0.0,
+    "max_daily_reviews": 0.0,
+    "burstiness": 0.0214,
+    "rating_deviation": 0.0,
+    "extreme_ratio": 0.0,
+    "review_rating": 0.0
+  },
+  "label_encoding_check": "passed",
+  "qa": {
+    "schema_violations": 0,
+    "constraint_violations": 0,
+    "nan_feature_cells": 0,
+    "daily_avg_max_abs_diff": 0.0,
+    "z_mean_max_abs": 0.0,
+    "z_std_max_dev": 0.0,
+    "degenerate_features": [],
+    "rows": 8092
+  },
+  "known_issues": [
+    "label_direction_unverified"
+  ],
+  "env": {
+    "python": "3.14.5",
+    "pandas": "3.0.5",
+    "numpy": "2.5.1",
+    "scikit_learn": "1.9.1",
+    "PYTHONHASHSEED": "0"
+  },
+  "python": "C:\\Users\\31039\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+  "table": {
+    "path": "data/processed/features/feature_table_fraudsquad_qwen2.csv",
+    "sha256": "522eb512568a42fa30716c096e66f889c8735af8371ec92226ba145b23ae205d"
+  },
+  "source_dataset": "fraudsquad_qwen2"
+}
