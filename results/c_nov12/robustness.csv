@@ -1,0 +1,10 @@
+direction_confirmed,changed_pre,changed_post,changed_retained,dataset,method,threshold,selected,actions,pre,post,still_detected,new_flags,post_missing
+1,1,0,0,fraudsquad_llama3,LOF,1.2621011461279021,20,1,20,19,19,0,0
+1,1,1,1,fraudsquad_llama3,iForest,0.5557724270973622,20,1,11,11,11,0,0
+1,1,1,1,fraudsquad_llama3,DBSCAN-core-distance,1.922953693844237,20,1,14,14,14,0,0
+3,3,1,1,fraudsquad_qwen2,LOF,1.2619175622469379,20,3,20,18,18,0,0
+3,2,2,2,fraudsquad_qwen2,iForest,0.5549599697284319,20,3,14,14,14,0,0
+3,2,2,2,fraudsquad_qwen2,DBSCAN-core-distance,1.9181875664667152,20,3,15,15,15,0,0
+3,3,2,2,fraudsquad_qwen_dsr1,LOF,1.2634912188768592,20,3,20,19,19,0,0
+3,2,1,1,fraudsquad_qwen_dsr1,iForest,0.5582791855767552,20,3,10,9,9,0,0
+3,2,2,2,fraudsquad_qwen_dsr1,DBSCAN-core-distance,1.9359849280747956,20,3,12,12,12,0,0
