@@ -68,7 +68,10 @@ fake-review-detection/
 - YelpChi / YelpNYC / YelpZip：Rayana & Akoglu, *Collective Opinion Spam Detection*, KDD 2015
   （YelpChi 还需引 Mukherjee et al., ICWSM 2013）
 - FraudSquad：Liu et al., *Detecting LLM-Generated Spam Reviews by Integrating Language Model
-  Embeddings and Graph Neural Network*, 2026
+  Embeddings and Graph Neural Network*, **2025**（arXiv 首版 2025-10，2026-04 修订；引用年份按首版写 2025）
+- FraudSquad 附带的 `QA.zip`：**不是 Yelp 数据**，是 Liu et al., WWW 2017
+  *Detecting Collusive Spamming Activities in Community Question Answering* 的中文问答社区（CQA）协同刷分数据，
+  本项目未用它建模
 
 **使用条款**：以上数据仅限学术研究，不得再分发或商用。原始文件已列入 `.gitignore`，
 仓库只保留下载脚本与校验值（sha256 写死在 `src/data/sources.py`）。

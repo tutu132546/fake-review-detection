@@ -179,13 +179,14 @@ FILES: Dict[str, List[RemoteFile]] = {
         ),
         # 以下两组是 FraudSquad 论文里"人类撰写的垃圾评论"对照材料，**不参与本项目建模**，
         # 仅作为来源留存，便于日后复核论文设置。注意它们与 Yelp 无关：
-        # QA.zip 是 THUIR WWW'17 的中文社区问答（CQA）协同刷分数据。
+        # QA.zip 是 THUIR WWW'17 的中文社区问答（CQA）协同刷分数据，论文中称 ChineseQA。
         _fraudsquad_file(
             "data/QA.zip",
             21_535_547,
             "e43276455d9cb2757abde563b5978703c6cdaac794a8ccd3f532402d1504488c",
-            "中文社区问答（CQA）协同刷分数据，来源 THUIR WWW'17（Detecting Collusive Spamming "
-            "Activities in Community Question Answering）；**不是 Yelp 数据**",
+            "中文社区问答（CQA）协同刷分数据（FraudSquad 论文中称 ChineseQA），"
+            "来源 Liu et al., WWW 2017《Detecting Collusive Spamming Activities in "
+            "Community Question Answering》（THUIR）；**不是 Yelp 数据**",
         ),
         _fraudsquad_file(
             "data/review_yelpHotelData_NRYRcleaned.txt",

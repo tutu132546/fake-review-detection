@@ -168,12 +168,13 @@ YelpZip 例外：镜像站不提供官方摘要，只能以"文件大小 + 内�
   | `reviews_from_llama3_8b.csv` | 2,489 | 1,250 | Llama3-8B 生成，全部 5 星，499 个商品 |
   | `reviews_from_qwen_72b.csv` | 2,495 | 1,250 | Qwen-72B 生成，全部 5 星，499 个商品 |
   | `reviews_from_qwen_dsr1.csv` | 2,500 | 1,250 | Qwen-DeepSeek-R1 生成，全部 5 星，500 个商品 |
-  | `QA.zip` | 37,998 + 24,953 行 | — | **中文社区问答（CQA）协同刷分数据**，来源 THUIR WWW'17，**不是 Yelp** |
+  | `QA.zip` | 37,998 + 24,953 行 | — | **中文社区问答（CQA）协同刷分数据**（论文中称 ChineseQA），来源 Liu et al., WWW 2017，**不是 Yelp** |
   | `review_yelpHotelData_NRYRcleaned.txt` | 5,854 | — | Yelp 酒店评论切片，辅助材料，**不可当作 YelpNYC** |
 
   > 订正：早期文档把 `QA.zip` 写成"FraudSquad 的 Yelp QA 人类垃圾评论集"，这是错的。
-  > 它的 readme 写明来自 `thuir.cn/.../WWW2017.zip`，对应论文 *Detecting Collusive Spamming
-  > Activities in Community Question Answering*（WWW 2017），内容是百度知道类的**中文问答**，
+  > 它的 readme 写明来自 `thuir.cn/.../WWW2017.zip`，对应论文 Yuli Liu, Yiqun Liu, Ke Zhou,
+  > Min Zhang, Shaoping Ma，*Detecting Collusive Spamming Activities in Community Question
+  > Answering*，WWW 2017（DOI 10.1145/3038912.3052594）；内容是百度知道类的**中文问答**协同刷分，
   > 与 Yelp、与酒店评论都无关。本项目**没有**用它做任何建模。
 
 - **三张表怎么构成**：`真实基线 86,758` + `单一模型生成集` → 89,247 / 89,253 / 89,258。
@@ -229,13 +230,16 @@ YelpZip 例外：镜像站不提供官方摘要，只能以"文件大小 + 内�
   year={2013}
 }
 
-@article{liu2026fraudsquad,
+@article{liu2025fraudsquad,
   title={Detecting LLM-Generated Spam Reviews by Integrating Language Model Embeddings and Graph Neural Network},
   author={Liu, Rafael and others},
-  year={2026},
-  note={Code: https://github.com/RafaelLiuZH/FraudSquad}
+  year={2025},
+  note={arXiv 首版 2025-10，2026-04 修订；Code: https://github.com/RafaelLiuZH/FraudSquad}
 }
 ```
+
+> 年份口径：按组长审核意见写 **2025**（arXiv 首版年份），不写 2026。
+> `schema.py` 里四个 FraudSquad 规格的 `citation` 字段已统一为 2025。
 
 ## 4. 合规自查清单（提交论文前逐条打勾）
 

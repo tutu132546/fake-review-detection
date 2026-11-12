@@ -48,8 +48,9 @@ LABEL_SOURCE_VALUES = (
     "yelp_filter",       # Yelp 平台过滤器结果（平台标注，非人工逐条标注）
     "real_baseline",     # 真实评论基线（未被替换的原始评论，构造上为真）
     "llm_generated",     # 由大模型生成，天然已知为假
-    "human_generated",   # 匿名众包/社区问答平台上的真人协同刷分（FraudSquad 的 QA 集，
-                         # 实为 THUIR WWW'17 中文社区问答数据，与 Yelp 无关）
+    "human_generated",   # 匿名众包/社区问答平台上的真人协同刷分。FraudSquad 的 QA 集即此类，
+                         # 实为 Liu et al., WWW 2017 的中文社区问答（CQA）协同刷分数据（论文中称
+                         # ChineseQA），与 Yelp 无关，本项目未用它建模
     "injected",          # 我们按行为模板注入的评论
 )
 

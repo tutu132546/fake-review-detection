@@ -642,6 +642,31 @@ def cmd_qa(args: argparse.Namespace) -> int:
             "残缺行本身因无标签无法使用。行数、账号数两个口径同时对上官方公布值，可确认缺口来源。"
             "补齐需要官方原版文件（邮件申请渠道见 provenance.md）。\n"
         )
+        lines.append(
+            "**是文件本来就没有，还是读取时被丢掉的？——是文件本来就这样，不是解析丢行。** 三条证据：\n"
+        )
+        lines.append(
+            "1. 原始字节层面：文件共 608,599 个物理换行，其中 608,459 个 `CRLF` + **140 个裸 `LF`**；"
+            "按 CSV 记录解析得 608,459 条，再去掉 1 条表头 = 608,458 条，与解析结果逐条对得上。"
+            "若是解析阶段丢行，丢的行不会在原始字节里留下痕迹。"
+        )
+        lines.append(
+            f"2. 结构层面：这 {audit['partial_rows']} 个裸 `LF` 后面紧跟的正是 "
+            "`user\\tproduct\\tdate\\ttext` 四列制表符分隔的残缺记录，缺的恰好是 rating 与 label；"
+            "它们没有独立的行首，所以被上一条未闭合引号的记录整体吞进 `text`。"
+        )
+        lines.append(
+            f"3. 数量层面：把这些残缺行按「独立记录」计回，行数 {audit['partial_rows'] + z['stats']['rows']:,}、"
+            f"账号数 {audit['dataset_users'] + audit['users_only_in_partial']:,} 两项同时等于官方公布值，"
+            "若中途丢行不可能两项同时对上。\n"
+        )
+        lines.append(
+            "**论文里可直接写的句子**：本项目使用的 YelpZip 取自公开镜像（ModelScope），"
+            f"与作者官方版本相差 {abs(z.get('rows_vs_expected_pct') or 0.0):.3f}%"
+            f"（{z['stats']['rows']:,} vs 608,598 条），"
+            "差额为镜像导出时 140 条记录缺失 rating/label 字段所致，已在读取阶段识别并剔除；"
+            "账号数 260,277 与官方一致。\n"
+        )
 
     lines.append("\n## 2.2 交付清单（已到位 / 待补）\n")
     lines.append("| 数据集 | 论文口径 | 状态 | 备注 |")
