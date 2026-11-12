@@ -16,12 +16,14 @@ fake-review-detection/
 │   │   ├── yelpnyc/       #   YelpNYC（待补）
 │   │   └── fraudsquad/    #   FraudSquad-Amazon 真实基线与 LLM 生成集
 │   └── processed/
-│       └── unified/       # 统一格式 parquet + manifest.json（构建产物）
+│       ├── unified/       # 统一格式 parquet + manifest.json（构建产物）
+│       ├── accounts/      # 账号级表（从评论级聚合）
+│       └── derived/       # 派生视图（规模对齐子样本，仅稳健性检查）
 ├── docs/
 │   └── data/provenance.md # 数据集来源、核验与使用条款
 ├── notebooks/             # 探索性分析，每人一个，命名如 01_eda_zhang.ipynb
 ├── src/
-│   ├── build_unified_data.py  # 数据管线入口（download / build / qa / verify）
+│   ├── build_unified_data.py  # 数据管线入口（download / build / accounts / subsample / qa / verify）
 │   ├── data/              # 统一数据层：下载、解析、schema、加载
 │   ├── crawler/           # 爬虫
 │   ├── features/          # 特征工程
@@ -36,19 +38,30 @@ fake-review-detection/
 
 ## 数据集
 
-四份公开数据集 + 一份自建注入集，全部整理成同一套评论级格式（`user / item / rating / date / label / text`）。
+公开数据 3 个来源 / 5 张论文口径表，加一份自建注入集，全部整理成同一套评论级格式
+（`user / item / rating / date / label / text`）。
 
 | 数据集 | 规模 | 文本 | 标签来源 | 状态 |
 |---|---|---|---|---|
 | **YelpChi** | 67,395 条 / 38,063 用户 / 201 商户 | 无 | Yelp 过滤器 | 已构建 |
-| **YelpNYC** | 官方 359,052 条 | 有 | Yelp 过滤器 | 未取得（需邮件申请） |
+| **YelpNYC** | 官方 359,052 条 / 923 商户（餐厅） | 有 | Yelp 过滤器 | ⛔ 未取得（仅邮件分发，申请未回复） |
 | **YelpZip** | 608,458 条 / 260,239 用户 / 5,044 商户 | 有 | Yelp 过滤器 | 已构建 |
-| **FraudSquad-Amazon** | 94,242 条（LLM 生成 7,484） | 有 | 构造即真值 | 已构建 |
+| **FraudSquad-Llama3** | 89,247 条（生成 2,489） | 有 | 构造即真值 | 已构建 |
+| **FraudSquad-Qwen2** | 89,253 条（生成 2,495） | 有 | 构造即真值 | 已构建 |
+| **FraudSquad-Qwen-DSR1** | 89,258 条（生成 2,500） | 有 | 构造即真值 | 已构建 |
+| *FraudSquad（三模型合并视图）* | *94,242 条（生成 7,484）* | 有 | 构造即真值 | 已构建，**仅总览、不作对比基准** |
 | **YelpChi + 300 注入账号**（自建） | 70,186 条（注入 2,791） | 无 | 注入脚本 | 已构建 |
 
-来源、核验过程与使用条款见 **[docs/data/provenance.md](docs/data/provenance.md)**；
-字段定义见 [data_dictionary.md 第十一节](data_dictionary.md)；实测质量见
-[results/data_quality_report.md](results/data_quality_report.md)。
+> **FraudSquad 为什么是三份**：论文里三个模型是三个独立数据集（真实基线 + 单一模型生成的假评论，
+> 每个被接管账号约 2 条假评论）。合并成一份后同一账号会攒到 4~6 条假评论，与原文数字无法对齐。
+
+主要文档（一页纸状态表在 [results/data_status.md](results/data_status.md)）：
+
+- 来源、核验过程与使用条款：**[docs/data/provenance.md](docs/data/provenance.md)**
+- 字段定义与账号级表：**[data_dictionary.md 第十一节](data_dictionary.md)**
+- 实测质量与使用陷阱：**[results/data_quality_report.md](results/data_quality_report.md)**
+- YelpNYC 缺失的处理与替代方案：**[docs/data/yelpnyc_fallback.md](docs/data/yelpnyc_fallback.md)**
+- 规模对齐子样本的实测结果：**[results/yelpzip_scale359k.md](results/yelpzip_scale359k.md)**
 
 各数据集的引用要求：
 
@@ -58,10 +71,18 @@ fake-review-detection/
   Embeddings and Graph Neural Network*, 2026
 
 **使用条款**：以上数据仅限学术研究，不得再分发或商用。原始文件已列入 `.gitignore`，
-仓库只保留下载脚本与校验值。
+仓库只保留下载脚本与校验值（sha256 写死在 `src/data/sources.py`）。
 
-> 关于 YelpNYC：官方发布页只提供邮件申请渠道（srayana@cs.stonybrook.edu），无直链。
-> 拿到文件后放进 `data/raw/yelpnyc/` 重跑构建即可自动纳入，无需改代码。
+> 关于 YelpNYC：官方发布页只提供邮件申请渠道（srayana@cs.stonybrook.edu），无直链；
+> 我们已发信申请但未获回复，按「拿不到就如实标缺失、不拿别的数据顶替」处理。
+> 拿到 `metadata` 后放进 `data/raw/yelpnyc/` 重跑构建即可自动纳入；
+> 若同时提供 `reviewContent`（评论文本），还需补一个约 30 行的 `read_review_content()`
+> ——它只有 `author` + `date`、没有商品 ID，与 metadata 的对齐必须人工抽查后才能启用，
+> 详见 [docs/data/yelpnyc_fallback.md](docs/data/yelpnyc_fallback.md) §5。
+>
+> 作为规模敏感性检查，`subsample` 子命令会生成 YelpZip 的规模对齐子样本
+> （`data/processed/derived/yelpzip_scale359k_seed{0..4}.parquet`，约 35.9 万条 × 5 个种子）。
+> **它是派生视图，不是 YelpNYC，也不进主对比表。**
 
 ## 分工
 
@@ -88,32 +109,37 @@ fake-review-detection/
 pip install -r requirements.txt
 ```
 
-### 第一步：准备统一格式的数据（四份公开数据集）
+### 第一步：准备统一格式的数据
 
 ```bash
-python src/build_unified_data.py download   # 按清单下载（断点续传 + 多镜像回退）
+python src/build_unified_data.py download   # 按清单下载（断点续传 + 多镜像回退 + sha256 校验）
 python src/build_unified_data.py build      # 解析 -> 校验 -> 写 parquet + manifest
+python src/build_unified_data.py accounts   # 从评论级聚合出账号级表
+python src/build_unified_data.py subsample  # YelpZip 规模对齐派生视图（YelpNYC 备选方案 A）
 python src/build_unified_data.py qa         # 生成 results/data_quality_report.md
 python src/build_unified_data.py verify     # 校验产物与 manifest 一致
 # 一条命令跑完
 python src/build_unified_data.py all
 ```
 
-产物在 `data/processed/unified/`（已 gitignore）：
+产物在 `data/processed/`（已 gitignore）：
 
 | 文件 | 内容 |
 |---|---|
-| `yelpchi.parquet` / `yelpzip.parquet` / `fraudsquad_amazon.parquet` / `yelpchi_injected.parquet` | 各数据集的统一表 |
-| `all_reviews.parquet` | 上述合并表（84 万条），带 `dataset` 列区分来源 |
-| `manifest.json` | 构建时间、原始文件 sha256、各集统计、官方规模对照 |
+| `unified/yelpchi.parquet` / `yelpzip.parquet` / `fraudsquad_{llama3,qwen2,qwen_dsr1}.parquet` / `yelpchi_injected.parquet` | 论文口径的 6 张评论级表 |
+| `unified/fraudsquad_amazon.parquet` | 三模型合并**视图**，仅供总览，不进 `all_reviews` |
+| `unified/all_reviews.parquet` | 上述 6 张表合并（101 万条），带 `dataset` 列区分来源 |
+| `accounts/<dataset>.parquet` | 账号级表（7 份），含 `account_label` 与 `label_basis` |
+| `unified/manifest.json` | 构建时间、原始文件 sha256、各集统计、官方规模对照、YelpZip 残缺行审计 |
+| `derived/yelpzip_scale359k_seed{0..4}.parquet` | **派生视图**：YelpZip 按商户分层抽到 35.9 万条，只做 YelpNYC 缺失时的规模敏感性检查，不是 YelpNYC，不进主对比表 |
 
 下游读数据统一走 `src/data/load.py`：
 
 ```python
 import sys; sys.path.insert(0, "src")
-from data import load_dataset, load_all, list_datasets
+from data import load_dataset, load_all, load_accounts, list_datasets
 
-print(list_datasets())                    # 哪些数据集已构建、规模多少
+print(list_datasets())                    # 哪些数据集已构建、规模多少、role 是 paper/view
 df = load_dataset("yelpzip")              # 单集
 df = load_dataset("yelpzip", with_text=False)   # 不要文本时省内存
 both = load_all(["yelpchi", "fraudsquad_amazon"])

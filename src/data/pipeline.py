@@ -18,6 +18,7 @@ import platform
 import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -27,6 +28,8 @@ from . import readers, sources
 from .download import download_many, sha256_of
 from .load import MANIFEST_NAME
 from .paths import (
+    ACCOUNTS_DIR,
+    DERIVED_DIR,
     DOWNLOAD_CACHE_DIR,
     LEGACY_INJECTION_LOG,
     LEGACY_YELPCHI_METADATA,
@@ -45,9 +48,12 @@ from .paths import (
 from .schema import (
     DATASET_SPECS,
     PUBLIC_DATASETS,
+    VIEW_ONLY_DATASETS,
     SchemaError,
+    build_account_table,
     coerce_dtypes,
     summary_stats,
+    validate_accounts,
     validate_reviews,
 )
 
@@ -114,7 +120,26 @@ def build_yelpzip() -> Tuple[pd.DataFrame, List[dict], str]:
     if path is None:
         return pd.DataFrame(), [], "未找到 YelpZip 数据，请先运行 download 子命令"
     df = readers.read_yelp_family(path, "yelpzip")
-    return df, [_raw_record(path)], f"来源文件 {path.name}（带评论文本）"
+    raw_audit = df.attrs.get("partial_row_audit") or {}
+    note = f"来源文件 {path.name}（带评论文本）"
+    if raw_audit:
+        only_in_partial = set(raw_audit["partial_users"]) - set(df["user_id"])
+        audit = {
+            "partial_rows": int(raw_audit["partial_rows"]),
+            "contaminated_records": int(raw_audit["contaminated_records"]),
+            "partial_users": len(raw_audit["partial_users"]),
+            "partial_items": len(raw_audit["partial_items"]),
+            "users_only_in_partial": len(only_in_partial),
+            "dataset_users": int(df["user_id"].nunique()),
+        }
+        df.attrs["partial_row_audit"] = audit
+        note += (
+            f"；解析出 {len(df):,} 条带标签记录，另有 {audit['partial_rows']} 行因镜像导出缺陷"
+            f"缺 rating/label 而不可用（涉及 {audit['partial_users']} 个账号、{audit['partial_items']} 个商品，"
+            f"其中 {audit['users_only_in_partial']} 个账号只出现在残缺行）；"
+            f"{audit['contaminated_records']} 条正常记录的文本曾被这些残缺行污染，已在读取阶段剥离"
+        )
+    return df, [_raw_record(path)], note
 
 
 def build_yelpnyc() -> Tuple[pd.DataFrame, List[dict], str]:
@@ -126,26 +151,43 @@ def build_yelpnyc() -> Tuple[pd.DataFrame, List[dict], str]:
     return df, [_raw_record(path)], f"来源文件 {path.name}"
 
 
-def build_fraudsquad() -> Tuple[pd.DataFrame, List[dict], str]:
+#: FraudSquad 的原始文件：真实基线 + 三个模型各自的生成集
+_FRAUDSQUAD_MODELS: Dict[str, str] = {
+    "llama3_8b": "fraudsquad_llama3",
+    "qwen_72b": "fraudsquad_qwen2",
+    "qwen_dsr1": "fraudsquad_qwen_dsr1",
+}
+
+
+def build_fraudsquad(dataset_id: str = "fraudsquad_amazon", only: Optional[str] = None) -> Tuple[pd.DataFrame, List[dict], str]:
+    """构建 FraudSquad 数据集。
+
+    `only=None`  → 三个模型合并的总览视图（fraudsquad_amazon），不用于论文对比；
+    `only=<模型>` → 真实基线 + 该模型生成的假评论，即论文口径的**单个数据集**。
+    拆分是必须的：论文里三个模型是三个独立数据集，合并后每个被接管账号会攒到 4~6 条
+    假评论（实测 930 个账号 4 条、304 个账号 6 条），与原文数字无法对齐。
+    """
     real_zip = RAW_FRAUDSQUAD_DIR / "amazon_2022_5core.csv.zip"
     if not real_zip.exists():
         return pd.DataFrame(), [], "未找到 amazon_2022_5core.csv.zip，请先运行 download 子命令"
 
     real_csv = readers.unzip_if_needed(real_zip, RAW_FRAUDSQUAD_DIR / "amazon", expect=".csv")
-    generated = {
-        name: p
-        for name, p in {
-            "llama3_8b": RAW_FRAUDSQUAD_DIR / "reviews_from_llama3_8b.csv",
-            "qwen_72b": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_72b.csv",
-            "qwen_dsr1": RAW_FRAUDSQUAD_DIR / "reviews_from_qwen_dsr1.csv",
-        }.items()
-        if p.exists() and p.stat().st_size > 0
+    all_generated = {
+        name: RAW_FRAUDSQUAD_DIR / f"reviews_from_{name}.csv" for name in _FRAUDSQUAD_MODELS
     }
+    candidates = all_generated if only is None else {only: all_generated[only]}
+    generated = {k: v for k, v in candidates.items() if v.exists() and v.stat().st_size > 0}
     if not generated:
-        return pd.DataFrame(), [], "未找到任何 LLM 生成集（reviews_from_*.csv）"
-    missing = [k for k in ("llama3_8b", "qwen_72b", "qwen_dsr1") if k not in generated]
-    df = readers.read_fraudsquad_amazon(real_csv, generated)
-    note = f"真实基线 {real_csv.name}；生成集 {sorted(generated)}"
+        return pd.DataFrame(), [], "未找到 LLM 生成集（reviews_from_*.csv）"
+
+    missing = [k for k in candidates if k not in generated]
+    df = readers.read_fraudsquad_amazon(real_csv, generated, dataset_id=dataset_id)
+    models = sorted(generated)
+    note = f"真实基线 {real_csv.name} + 生成集 {models}"
+    if only is not None:
+        note += f"（单模型数据集，论文口径）"
+    else:
+        note += "（三模型合并视图，仅供总览，不作对比基准）"
     if missing:
         note += f"；缺失生成集 {missing}（结果表中需如实说明）"
     records = [_raw_record(real_zip), _raw_record(real_csv)] + [_raw_record(p) for p in generated.values()]
@@ -214,8 +256,27 @@ BUILDERS = {
     "yelpchi": build_yelpchi,
     "yelpnyc": build_yelpnyc,
     "yelpzip": build_yelpzip,
-    "fraudsquad_amazon": build_fraudsquad,
+    # 三个单模型数据集 = 论文口径的独立数据集（真实基线 + 单一模型生成集）
+    "fraudsquad_llama3": partial(build_fraudsquad, dataset_id="fraudsquad_llama3", only="llama3_8b"),
+    "fraudsquad_qwen2": partial(build_fraudsquad, dataset_id="fraudsquad_qwen2", only="qwen_72b"),
+    "fraudsquad_qwen_dsr1": partial(build_fraudsquad, dataset_id="fraudsquad_qwen_dsr1", only="qwen_dsr1"),
+    # 合并视图，仅供总览，不进 all_reviews
+    "fraudsquad_amazon": partial(build_fraudsquad, dataset_id="fraudsquad_amazon"),
     "yelpchi_injected": build_injected,
+}
+
+#: 不参与 all_reviews 合并的数据集：合并视图会与三个单模型表重复计数
+COMBINE_EXCLUDE = frozenset(VIEW_ONLY_DATASETS)
+
+#: 账号级表的标签口径：每个数据集按自身构造方式给出，不用统一猜测
+ACCOUNT_LABEL_BASIS_BY_DATASET: Dict[str, str] = {
+    "yelpchi": "platform_filtered",
+    "yelpzip": "platform_filtered",
+    "fraudsquad_llama3": "hijacked_by_llm",
+    "fraudsquad_qwen2": "hijacked_by_llm",
+    "fraudsquad_qwen_dsr1": "hijacked_by_llm",
+    "fraudsquad_amazon": "hijacked_by_llm",
+    "yelpchi_injected": "injected",
 }
 
 
@@ -318,12 +379,15 @@ def cmd_build(args: argparse.Namespace) -> int:
             "expected_rows": expected,
             "rows_vs_expected_pct": None if not expected else round(100 * (stats["rows"] - expected) / expected, 3),
             "build_seconds": round(time.time() - t0, 1),
+            **({"partial_row_audit": df.attrs["partial_row_audit"]} if df.attrs.get("partial_row_audit") else {}),
             **extra,
         }
         logger.info("%s 完成：%d 行，假评论占比 %.2f%%", name, stats["rows"], 100 * stats["fake_ratio"])
 
     if not args.no_combined:
-        manifest["combined"] = _write_combined([n for n in BUILDERS if (UNIFIED_DIR / f"{n}.parquet").exists()])
+        manifest["combined"] = _write_combined(
+            [n for n in BUILDERS if n not in COMBINE_EXCLUDE and (UNIFIED_DIR / f"{n}.parquet").exists()]
+        )
 
     with open(UNIFIED_DIR / MANIFEST_NAME, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -361,21 +425,96 @@ def _label_source_breakdown(path: Path) -> Dict[str, int]:
     return {str(k): int(v) for k, v in t["label_source"].value_counts().items()}
 
 
-def _caveats(name: str, path: Path) -> List[str]:
+_FS_USER_CACHE: Dict[str, set] = {}
+
+_FS_SINGLE_MODELS = ("fraudsquad_llama3", "fraudsquad_qwen2", "fraudsquad_qwen_dsr1")
+
+
+def _generated_users(name: str) -> set:
+    """读某个 FraudSquad 单模型表里"写过生成评论"的账号集合（带缓存）。
+
+    注意用 `label_source == "llm_generated"` 而不是 `label == 1`：真实基线里的
+    账号可能同时被 Yelp 平台标过假，用 label 会把它们误算进来。
+    """
+    if name in _FS_USER_CACHE:
+        return _FS_USER_CACHE[name]
+    import pyarrow.parquet as pq
+
+    path = UNIFIED_DIR / f"{name}.parquet"
+    if not path.exists():
+        return set()
+    t = pq.read_table(path, columns=["user_id", "label_source"]).to_pandas()
+    users = set(t.loc[t["label_source"] == "llm_generated", "user_id"])
+    _FS_USER_CACHE[name] = users
+    return users
+
+
+def _fs_account_relation() -> str:
+    """算清三份 FraudSquad 单模型表到底是不是同一批被接管账号，并给出可读结论。
+
+    组长审核意见原文是"Llama3 和 Qwen2 用的是同一批 1,250 个账号"。这句话对
+    前两份成立，但第三份（qwen_dsr1）是另一批账号——这一点必须由数据算出来再
+    写进报告，不能凭印象写死，否则跨模型比较的口径会被说错。
+    """
+    sets = {name: _generated_users(name) for name in _FS_SINGLE_MODELS}
+    if any(not v for v in sets.values()):
+        return ""
+
+    a, b, c = (sets[n] for n in _FS_SINGLE_MODELS)
+    la, lb, lc = _FS_SINGLE_MODELS
+    same_ab = a == b
+    union = a | b | c
+
+    parts: List[str] = []
+    if same_ab:
+        parts.append(
+            f"`{la}` 与 `{lb}` 的被接管账号**完全相同**（各 {len(a):,} 个，集合相等）"
+        )
+    else:
+        parts.append(
+            f"`{la}` 与 `{lb}` 的被接管账号**不完全相同**"
+            f"（{len(a):,} vs {len(b):,}，交集 {len(a & b):,}）"
+        )
+    parts.append(
+        f"`{lc}` 是**另一批**账号（{len(c):,} 个，与前者交集仅 {len(a & c):,}），"
+        f"三者并集 {len(union):,} 个"
+    )
+    head = "；".join(parts) + "。"
+
+    if same_ab:
+        tail = (
+            f"因此：{la} vs {lb} 是**同一批账号的配对比较**（同账号换模型，"
+            "可以算配对差、不能当两组独立样本做显著性检验）；"
+            f"而 {lc} 与它们**只有 {len(a & c):,} 个账号重叠**，"
+            f"是「换账号 + 换模型」的混合差异，不能解读为纯模型效应。"
+        )
+    else:
+        tail = (
+            "三份表的账号集合都不完全相同，跨模型比较同时混入了账号差异，"
+            "报告时需注明不是纯模型效应。"
+        )
+    return head + tail
+
+
+def _caveats(name: str, path: Path, manifest: Optional[dict] = None) -> List[str]:
     """针对具体数据集给出"用之前必须知道"的陷阱，全部由数据算出来，不写死结论。"""
     import pyarrow.parquet as pq
 
+    manifest = manifest or {}
+    info = manifest.get("datasets", {}).get(name, {})
+
     out: List[str] = []
-    if name == "fraudsquad_amazon":
+    if name.startswith("fraudsquad"):
         df = pq.read_table(path, columns=["user_id", "label", "label_source", "rating"]).to_pandas()
         real_users = set(df.loc[df["label_source"] == "real_baseline", "user_id"])
         gen_users = set(df.loc[df["label_source"] == "llm_generated", "user_id"])
         overlap = gen_users & real_users
         out.append(
-            f"**生成评论复用了真实账号**：{len(gen_users):,} 个发布过生成评论的用户中，"
+            f"**被接管账号同时保留真实评论**：{len(gen_users):,} 个写过生成评论的账号中，"
             f"{len(overlap):,} 个（{100 * len(overlap) / max(len(gen_users), 1):.1f}%）在真实基线里也有真实评论。"
-            "因此**不能**用「该用户是否发过生成评论」直接当账号级标签——那会把正常用户的账号误判为水军。"
-            "账号级分析请改用评论级标签 + 人工核对，或把混合账号单独标记。"
+            "这是论文的设定（接管既有账号），**账号级实验可以做**：正例 = 被接管账号，负例 = 其余账号，"
+            "见 `python src/build_unified_data.py accounts`。"
+            "唯一不能做的是**评论级**拿「账号是否被接管」当标签——那会把这个账号的历史真实评论也标成假的。"
         )
         gen_rating = df.loc[df["label"] == 1, "rating"]
         out.append(
@@ -384,6 +523,23 @@ def _caveats(name: str, path: Path) -> List[str]:
             f"{100 * (df.loc[df['label'] == 0, 'rating'] == 5).mean():.1f}%。"
             "任何用评分做输入的模型都会因此虚高，报告结果时必须把「仅评分」作为一个对照基线报出来。"
         )
+        if name == "fraudsquad_amazon":
+            per_user = df.loc[df["label_source"] == "llm_generated"].groupby("user_id").size()
+            out.append(
+                f"**这是三模型合并视图**：{len(per_user):,} 个被接管账号共 {int(per_user.sum()):,} 条假评论，"
+                f"每人 {int(per_user.min())}~{int(per_user.max())} 条（均值 {per_user.mean():.1f}），"
+                "与原文「每个账号 2 条」的口径不一致，**不要拿它和论文数字比**。"
+                "对比实验请用 fraudsquad_llama3 / fraudsquad_qwen2 / fraudsquad_qwen_dsr1。"
+            )
+        else:
+            out.append(
+                "**单模型口径**：本表 = 真实基线 86,758 条 + 单一模型生成集，1,250 个被接管账号，"
+                "每人约 2 条假评论，与论文设定一致。真实基线在三份单模型表里是同一份，"
+                "所以三份表**不是三个互相独立的数据集**。"
+            )
+            relation = _fs_account_relation()
+            if relation:
+                out.append("**账号集合关系（按数据实算）**：" + relation)
     if name == "yelpchi":
         out.append(
             "**该版本无评论文本**：metadata 版只含 user/product/rating/label/date，"
@@ -395,6 +551,18 @@ def _caveats(name: str, path: Path) -> List[str]:
             "**标签为平台过滤器结果**（near ground truth）：Yelp 的过滤算法本身有误判，"
             "这是所有使用该数据集的论文的共同前提，报告中需说明。"
         )
+        audit = info.get("partial_row_audit")
+        if audit:
+            only_ratio = 100 * audit["users_only_in_partial"] / max(audit["dataset_users"], 1)
+            out.append(
+                f"**镜像文件有 {audit['partial_rows']} 行导出残缺**：这些行只有 "
+                "`user / product / date / text` 四列，缺 rating 与 label，会被前一条未闭合引号的记录吞进正文。"
+                f"读取阶段已剥离（{audit['contaminated_records']} 条正常记录的正文恢复干净），"
+                f"但残缺行本身无标签、无法使用：涉及 {audit['partial_users']} 个账号，"
+                f"其中 {audit['users_only_in_partial']} 个只出现在残缺行，"
+                f"在 YelpZip 上做账号级实验时这部分账号缺位（占账号总数 {only_ratio:.3f}%）。"
+                "补齐需要官方原版文件，见 docs/data/provenance.md §3。"
+            )
     if name == "yelpchi_injected":
         out.append(
             "**注入评论没有文本**：step3 只生成结构化事件（日期/评分/商品），"
@@ -454,10 +622,62 @@ def cmd_qa(args: argparse.Namespace) -> int:
                 )
     if not any_issue:
         lines.append("- 已构建的数据集行数与官方公布规模偏差均在 2% 以内。")
-    lines.append(
-        "- **YelpNYC 建议的补齐方式**：向 srayana@cs.stonybrook.edu 邮件申请（注明课程用途）取得后，"
-        "把文件放到 `data/raw/yelpnyc/` 再跑一次 `build`，管线会自动识别并纳入，无需改代码。"
-    )
+    # YelpZip 的行数缺口单独交代清楚：这不是"解析丢行"，而是镜像文件本身有残缺行
+    z = manifest["datasets"].get("yelpzip", {})
+    audit = z.get("partial_row_audit")
+    if audit and z.get("stats"):
+        lines.append("\n### 2.1 YelpZip 与官方 608,598 条的差额对账\n")
+        lines.append("| 项目 | 数量 | 说明 |")
+        lines.append("|---|---|---|")
+        lines.append(f"| 镜像文件数据行 | {audit['partial_rows'] + z['stats']['rows']:,} | 与官方公布条数一致 |")
+        lines.append(f"| 其中带标签、可用 | {z['stats']['rows']:,} | 进入统一表 |")
+        lines.append(f"| 其中导出残缺、不可用 | {audit['partial_rows']:,} | 缺 rating 与 label，无法作为样本 |")
+        lines.append(
+            f"| 账号并集 | {audit['dataset_users']:,} + {audit['users_only_in_partial']:,} = "
+            f"{audit['dataset_users'] + audit['users_only_in_partial']:,} | 官方公布 260,277，完全吻合 |"
+        )
+        lines.append(
+            "\n**结论**：镜像并非「少了 140 行」，而是这 140 行在导出时丢了 rating 与 label 两个字段，"
+            "并且被前一条未闭合引号的记录吞进正文。读取阶段已把这些残缺行从正常记录的正文里剥离，"
+            "残缺行本身因无标签无法使用。行数、账号数两个口径同时对上官方公布值，可确认缺口来源。"
+            "补齐需要官方原版文件（邮件申请渠道见 provenance.md）。\n"
+        )
+
+    lines.append("\n## 2.2 交付清单（已到位 / 待补）\n")
+    lines.append("| 数据集 | 论文口径 | 状态 | 备注 |")
+    lines.append("|---|---|---|---|")
+    for name in PUBLIC_DATASETS:
+        info = manifest["datasets"].get(name, {"status": "missing"})
+        st = info.get("stats") or {}
+        if info.get("status") == "ok":
+            lines.append(f"| {name} | 是 | ✅ 已构建 {st['rows']:,} 条 | {DATASET_SPECS[name].single_model or '—'} |")
+        else:
+            lines.append(f"| {name} | 是 | ⛔ 缺失 | {info.get('note', '')[:60]} |")
+    for name in VIEW_ONLY_DATASETS:
+        info = manifest["datasets"].get(name, {})
+        st = info.get("stats") or {}
+        if st:
+            lines.append(f"| {name} | 否（仅总览视图） | ✅ {st['rows']:,} 条 | 不进 all_reviews |")
+
+    # 派生视图（规模对齐子样本）：单独说明，避免被当成第 4 个公开数据集
+    derived_manifest = DERIVED_DIR / "manifest.json"
+    if derived_manifest.exists():
+        with open(derived_manifest, "r", encoding="utf-8") as f:
+            dm = json.load(f)
+        lines.append("\n### 2.2.1 派生视图（**不是数据集**）\n")
+        lines.append(
+            f"| 视图 | 来源 | 目标量级 | 种子数 | 实际评论数 | 假评占比 | 用途 |\n"
+            "|---|---|---|---|---|---|---|\n"
+            f"| `{dm['view']}` | {dm['source_dataset']} | {dm['target_rows']:,} | "
+            f"{len(dm['runs'])} | {dm['rows_min']:,}~{dm['rows_max']:,} | "
+            f"{100 * dm['fake_ratio_mean']:.2f}% | YelpNYC 缺失时的规模敏感性检查 |"
+        )
+        lines.append(
+            f"\n> 该视图按商户评论数分 {dm['n_strata']} 层抽样、整商户抽取，"
+            f"实测假评占比 {100 * dm['fake_ratio_mean']:.2f}%，源表 {100 * dm['source_fake_ratio']:.2f}%，"
+            "说明抽样没有扭曲标签分布。**它只对齐评论总量，不是 YelpNYC，也不进主对比表**；"
+            "用法见 `results/" + str(dm["view"]) + ".md`。"
+        )
 
     lines.append("\n## 3. 标签来源构成（决定能否与其他论文对比）\n")
     lines.append("| 数据集 | 标签来源 | 条数 |")
@@ -501,20 +721,41 @@ def cmd_qa(args: argparse.Namespace) -> int:
         path = UNIFIED_DIR / f"{name}.parquet"
         if info.get("status") != "ok" or not path.exists():
             continue
-        notes = _caveats(name, path)
+        notes = _caveats(name, path, manifest)
         if notes:
             lines.append(f"### {name}\n")
             for n_ in notes:
                 lines.append(f"- {n_}")
             lines.append("")
 
-    lines.append("## 6. 标签口径与公平对比提示\n")
+    lines.append("## 6. 账号级视图（`build_unified_data.py accounts` 产出）\n")
+    acc = manifest.get("accounts") or []
+    if acc:
+        lines.append("| 数据集 | 账号数 | 正例账号 | 正例占比 | 账号标签口径 |")
+        lines.append("|---|---|---|---|---|")
+        for a in acc:
+            lines.append(
+                f"| {a['dataset']} | {a['accounts']:,} | {a['positive_accounts']:,} | "
+                f"{100 * a['positive_ratio']:.2f}% | `{a['label_basis']}` |"
+            )
+        lines.append(
+            "\n账号级正例的定义见 `src/data/schema.py: ACCOUNT_LABEL_BASIS`。"
+            "**账号级与评论级是两个不同任务**：账号级问「这个号是不是水军」，评论级问「这条评论是不是假的」。"
+            "FraudSquad 的被接管账号同时有真实评论，因此账号级正例不代表其全部评论为假；"
+            "反过来，评论级实验也不能拿账号标签当答案。\n"
+        )
+    else:
+        lines.append("- 尚未生成，运行 `python src/build_unified_data.py accounts`。\n")
+
+    lines.append("## 7. 标签口径与公平对比提示\n")
     lines.append("- Yelp 系列标签来自 Yelp 平台过滤器（near ground truth），不是人工逐条标注，存在平台自身误差。")
     lines.append("- FraudSquad 的虚假评论由大模型生成，真实评论取自 Amazon 5-core，属「构造即真值」。")
+    lines.append("- 三个 FraudSquad 单模型表是**论文口径的独立数据集**；合并视图 `fraudsquad_amazon` 只作总览。")
     lines.append("- 人工注入集（yelpchi_injected）的标签由注入脚本保证，与平台标签不可混为一谈。")
     lines.append("- 对比实验必须写明每种方法是否需要标签：LOF/iForest/DBSCAN 无监督；TF-IDF+LR 与 GNN 类方法有监督。")
-    lines.append("- 需要说明的是：YelpChi 与 YelpZip 的假评论比例（约 13%）相近，而 FraudSquad 为 7.94%，"
-                 "跨数据集的绝对数值不可直接横向比较，只能说「在同一数据集上谁更好」。\n")
+    lines.append("- 需要说明的是：YelpChi 与 YelpZip 的假评论比例（约 13%）相近，而 FraudSquad 三个单模型表"
+                 "分别约 2.8%（真实基线占绝大多数），跨数据集的绝对数值不可直接横向比较，"
+                 "只能说「在同一数据集、同一划分下谁更好」。\n")
 
     out = RESULTS_DIR / "data_quality_report.md"
     ensure_dir(RESULTS_DIR)
@@ -570,8 +811,101 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# 账号级视图
+# --------------------------------------------------------------------------
+
+def cmd_accounts(args: argparse.Namespace) -> int:
+    """从已构建的评论级表聚合出账号级表，供账号级检测实验使用。
+
+    为什么要做账号级：FraudSquad 与我们的注入实验都是"接管一批既有账号、让它们写假评论"，
+    这正是水军的真实形态。账号级任务的正确表述是「在被接管账号 vs 普通账号之间分类」，
+    而不是把该账号的历史真实评论也当成假评论（那是评论级的错）。
+    """
+    manifest_path = UNIFIED_DIR / MANIFEST_NAME
+    if not manifest_path.exists():
+        logger.error("尚未构建评论级表，请先运行 build")
+        return 1
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    ensure_dir(ACCOUNTS_DIR)
+    names = args.dataset or [n for n in BUILDERS if (UNIFIED_DIR / f"{n}.parquet").exists()]
+    summary: List[dict] = []
+    for name in names:
+        src = UNIFIED_DIR / f"{name}.parquet"
+        if not src.exists():
+            logger.warning("%s 尚未构建，跳过账号级聚合", name)
+            continue
+        basis = ACCOUNT_LABEL_BASIS_BY_DATASET.get(name)
+        if basis is None:
+            logger.warning("%s 没有定义账号标签口径，跳过", name)
+            continue
+        df = pd.read_parquet(src, columns=["dataset", "user_id", "item_id", "date", "label", "is_injected"])
+        acc = validate_accounts(build_account_table(df, label_basis=basis), context=name)
+        out = ACCOUNTS_DIR / f"{name}.parquet"
+        acc.to_parquet(out, index=False, compression="zstd")
+        pos = int(acc["account_label"].sum())
+        summary.append(
+            {
+                "dataset": name,
+                "accounts": int(len(acc)),
+                "positive_accounts": pos,
+                "positive_ratio": round(pos / max(len(acc), 1), 6),
+                "label_basis": basis,
+                "parquet": str(out.relative_to(PROJECT_ROOT)),
+                "parquet_sha256": sha256_of(out),
+            }
+        )
+        logger.info(
+            "%s 账号级：%d 个账号，其中 %d 个正例（%.2f%%）",
+            name, len(acc), pos, 100 * pos / max(len(acc), 1),
+        )
+
+    manifest["accounts"] = summary
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
+
+def cmd_subsample(args: argparse.Namespace) -> int:
+    """生成 YelpZip 的「规模对齐」派生视图，用于 YelpNYC 缺失时的稳健性检查。
+
+    这对应 docs/data/yelpnyc_fallback.md 的方案 A。它只对齐评论总量这一个维度，
+    **不是 YelpNYC 的替身**；产物放在 data/processed/derived/，不进 unified，
+    也不会出现在 all_reviews 与主对比表里，避免被误当成第 4 个公开数据集。
+    """
+    from . import subsample as subsample_mod
+
+    src = UNIFIED_DIR / "yelpzip.parquet"
+    if not src.exists():
+        logger.error("缺少 %s，请先运行 build", src.relative_to(PROJECT_ROOT))
+        return 1
+
+    seeds = tuple(args.seeds) if args.seeds else subsample_mod.DEFAULT_SEEDS
+    target = int(args.target or subsample_mod.TARGET_ROWS)
+    df = pd.read_parquet(src)
+    manifest = subsample_mod.build_views(
+        df,
+        DERIVED_DIR,
+        target_rows=target,
+        seeds=seeds,
+        n_strata=args.strata,
+        with_text=not args.no_text,
+    )
+
+    report_path = RESULTS_DIR / f"{manifest['view']}.md"
+    ensure_dir(RESULTS_DIR)
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(subsample_mod.render_report(manifest))
+    logger.info("派生视图报告已写入 %s", report_path)
+    print(json.dumps({k: v for k, v in manifest.items() if k != "runs"}, ensure_ascii=False, indent=2))
+    return 0
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="四数据集统一数据管线")
@@ -592,10 +926,21 @@ def build_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("qa", help="生成质量报告")
     q.set_defaults(func=cmd_qa)
 
+    ac = sub.add_parser("accounts", help="生成账号级表（从评论级聚合）")
+    ac.add_argument("--dataset", nargs="*", help="只处理指定数据集")
+    ac.set_defaults(func=cmd_accounts)
+
+    ss = sub.add_parser("subsample", help="生成 YelpZip 规模对齐派生视图（YelpNYC 备选方案 A）")
+    ss.add_argument("--target", type=int, default=None, help="目标评论数，默认取 YelpNYC 官方规模")
+    ss.add_argument("--seeds", type=int, nargs="*", help="随机种子列表，默认 0~4")
+    ss.add_argument("--strata", type=int, default=10, help="按商户评论数分层的层数，默认 10")
+    ss.add_argument("--no-text", action="store_true", help="不写评论文本（省磁盘）")
+    ss.set_defaults(func=cmd_subsample)
+
     v = sub.add_parser("verify", help="校验产物")
     v.set_defaults(func=cmd_verify)
 
-    a = sub.add_parser("all", help="download + build + qa + verify")
+    a = sub.add_parser("all", help="download + build + accounts + subsample + qa + verify")
     a.add_argument("--force", action="store_true")
     a.set_defaults(func=None)
     return p
@@ -614,6 +959,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ns = argparse.Namespace(dataset=None, force=args.force, tolerate_failure=False)
         rc = cmd_download(ns)
         rc = cmd_build(argparse.Namespace(dataset=None, no_combined=False)) or rc
+        cmd_accounts(argparse.Namespace(dataset=None))
+        if (UNIFIED_DIR / "yelpzip.parquet").exists():
+            cmd_subsample(
+                argparse.Namespace(target=None, seeds=None, strata=10, no_text=False)
+            )
         cmd_qa(argparse.Namespace())
         cmd_verify(argparse.Namespace())
         return rc

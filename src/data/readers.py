@@ -5,7 +5,8 @@
 探测失败的字段一律报错并给出实际表头，不猜。
 
 各数据集的标签语义差异只在本文件出现一次：
-- Yelp 系列：原始 1=推荐（真实）、-1 或 0=过滤（虚假）→ 统一翻转
+- Yelp 系列：原始 1=推荐（真实）、-1 或 0=过滤（虚假）→ 统一翻转，且翻转规则由
+  `schema.label_from_yelp()` 显式给定，不在本文件里写死方向
 - FraudSquad：真实基线 = 0；LLM 生成 = 1
 """
 
@@ -156,6 +157,78 @@ def _finalize(
 
 
 # --------------------------------------------------------------------------
+# YelpZip 镜像的导出缺陷修复
+# --------------------------------------------------------------------------
+
+#: YelpZip 公开镜像里有 140 行"导出残缺行"，形态为 `user \t product \t date \t text`：
+#: 只有 4 个字段，缺 rating 与 label。它们紧跟在某条「引号未闭合」的记录之后，
+#: 因此被 CSV 解析器当成上一条评论文本的一部分吞掉了。
+#: 结果：140 条评论从带标签记录里消失，同时 18 条正常评论的文本被污染成
+#: "原文（截断）+ 一堆残缺行 + 另一条评论的尾巴"。
+_PARTIAL_ROW_RE = re.compile(r"^\d+\t\d{1,12}\t\d{4}-\d{2}-\d{2}\t")
+
+
+def split_partial_rows(cell: str) -> Tuple[str, List[Tuple[str, str, str, str]]]:
+    """把一格文本拆成「本记录的正文」与「被吞进来的残缺行」。
+
+    仅当文本里真的出现残缺行时才会切分；普通的多行评论（YelpZip 里有 18 条真实
+    带换行的评论）原样保留。返回 (干净正文, 残缺行列表)，残缺行形如
+    (user_id, item_id, date, text)。
+    """
+    if "\n" not in cell:
+        return cell, []
+    segments = cell.split("\n")
+    first = next((i for i, seg in enumerate(segments) if _PARTIAL_ROW_RE.match(seg)), None)
+    if first is None:
+        return cell, []
+
+    rows: List[Tuple[str, str, str, str]] = []
+    tail: List[str] = []
+    for seg in segments[first:]:
+        if _PARTIAL_ROW_RE.match(seg):
+            if tail:  # 上一条残缺行的文本被换行截断了，补回去
+                rows[-1] = (rows[-1][0], rows[-1][1], rows[-1][2], rows[-1][3] + "\n" + "\n".join(tail))
+                tail = []
+            parts = seg.split("\t", 3)
+            rows.append((parts[0], parts[1], parts[2], parts[3] if len(parts) > 3 else ""))
+        else:
+            tail.append(seg)
+    if tail and rows:
+        rows[-1] = (rows[-1][0], rows[-1][1], rows[-1][2], rows[-1][3] + "\n" + "\n".join(tail))
+
+    clean = "\n".join(segments[:first]).strip()
+    return clean, rows
+
+
+def strip_partial_rows(series: pd.Series) -> Tuple[pd.Series, dict]:
+    """对整列文本做残缺行剥离，返回 (干净列, 审计信息)。
+
+    审计信息会写进 manifest / 质量报告：被污染记录数、剥出的残缺行数、
+    以及这些残缺行涉及的账号与商品（用于交叉核对官方用户总数）。
+    """
+    audit = {"contaminated_records": 0, "partial_rows": 0, "partial_users": set(), "partial_items": set()}
+    cleaned = series.astype("object").copy()
+    for idx, cell in cleaned.items():
+        if not isinstance(cell, str) or "\n" not in cell:
+            continue
+        clean, rows = split_partial_rows(cell)
+        if not rows:
+            continue
+        cleaned.at[idx] = clean
+        audit["contaminated_records"] += 1
+        audit["partial_rows"] += len(rows)
+        for uid, iid, _date, _text in rows:
+            audit["partial_users"].add(uid)
+            audit["partial_items"].add(iid)
+    logger.info(
+        "文本修复：%d 条记录被污染，剥出 %d 行残缺记录（涉及 %d 个账号 / %d 个商品）",
+        audit["contaminated_records"], audit["partial_rows"],
+        len(audit["partial_users"]), len(audit["partial_items"]),
+    )
+    return cleaned, audit
+
+
+# --------------------------------------------------------------------------
 # 通用 CSV/TXT 读取（带分块，避免 400MB 文本一次性进内存）
 # --------------------------------------------------------------------------
 
@@ -213,10 +286,12 @@ def read_tabular(
 _YELPCHI_FIXED_COLUMNS = ["user_id", "item_id", "rating", "label", "date"]
 
 
-def read_yelpchi(path: Path) -> pd.DataFrame:
+def read_yelpchi(path: Path, *, label_scheme: str = "auto") -> pd.DataFrame:
     """读取 YelpChi metadata（user / product / rating / label / date）。
 
     该版本不含评论文本，因此 text_available=0；文本版需向作者申请，见 provenance。
+    `label_scheme` 默认 auto：官方版本为 -1/1 可自动识别；若换成 0/1 编码的再加工版本，
+    会抛错要求显式指定方向（见 `schema.label_from_yelp`）。
     """
     df = read_tabular(path, sep=None)
     if all(c.startswith("col_") for c in df.columns):
@@ -230,14 +305,26 @@ def read_yelpchi(path: Path) -> pd.DataFrame:
         if missing:
             raise SchemaError(f"YelpChi 缺少列 {sorted(missing)}；实际表头: {list(df.columns)}")
 
-    df = df.assign(date=_parse_dates(df["date"]), label=label_from_yelp(df["label"]))
+    df = df.assign(
+        date=_parse_dates(df["date"]),
+        label=label_from_yelp(df["label"], scheme=label_scheme, context="yelpchi"),
+    )
     return _finalize(df, "yelpchi", label_source="yelp_filter", text_available=False)
 
 
-def read_yelp_family(path: Path, dataset: str, *, max_rows: Optional[int] = None) -> pd.DataFrame:
+def read_yelp_family(
+    path: Path,
+    dataset: str,
+    *,
+    max_rows: Optional[int] = None,
+    label_scheme: str = "auto",
+    repair_partial_rows: bool = True,
+) -> pd.DataFrame:
     """读取 YelpNYC / YelpZip 这类"带文本 + 带标签"的评论表。
 
     兼容：逗号/制表符分隔、有/无表头、带 BOM、rating 为 1.0 浮点、label 为 ±1。
+    `repair_partial_rows=True` 时会把镜像文件里"被吞进评论文本的导出残缺行"剥出来，
+    避免一条评论的正文里混进十几条别人的评论（详见 `strip_partial_rows`）。
     """
     df = read_tabular(path, max_rows=max_rows)
     mapping = map_columns(df.columns)
@@ -250,10 +337,19 @@ def read_yelp_family(path: Path, dataset: str, *, max_rows: Optional[int] = None
     if not text_available:
         logger.warning("%s 未找到文本列，text_available 将记为 0", dataset)
 
-    df = df.assign(date=_parse_dates(df["date"]), label=label_from_yelp(df["label"]))
+    partial_audit: dict = {}
+    if text_available and repair_partial_rows:
+        df["text"], partial_audit = strip_partial_rows(df["text"])
+
+    df = df.assign(
+        date=_parse_dates(df["date"]),
+        label=label_from_yelp(df["label"], scheme=label_scheme, context=dataset),
+    )
     out = _finalize(df, dataset, label_source="yelp_filter", text_available=text_available)
     if not text_available:
         out["text"] = ""
+    if partial_audit:
+        out.attrs["partial_row_audit"] = partial_audit
     return out
 
 
@@ -261,11 +357,18 @@ def read_yelp_family(path: Path, dataset: str, *, max_rows: Optional[int] = None
 # FraudSquad（LLM 生成的水军评论 + Amazon 真实基线）
 # --------------------------------------------------------------------------
 
-def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.DataFrame:
+def read_fraudsquad_amazon(
+    real_csv: Path,
+    generated: Dict[str, Path],
+    dataset_id: str = "fraudsquad_amazon",
+) -> pd.DataFrame:
     """把真实基线 + 各模型生成的假评论拼成一份统一表。
 
-    `generated` 形如 {"llama3_8b": path, "qwen_72b": path, ...}，键名会写进
-    `label_source` 之外的辅助统计（真实的模型名以文件名记入 manifest）。
+    `generated` 形如 {"llama3_8b": path, "qwen_72b": path, ...}；键名即模型标识。
+    **只传一个模型时得到的就是论文口径的单个数据集**（真实评论 + 该模型生成的假评论），
+    这也是 `fraudsquad_llama3 / fraudsquad_qwen2 / fraudsquad_qwen_dsr1` 的构建方式；
+    一次传多个模型则得到便于总览的合并视图 `fraudsquad_amazon`，不用于论文对比。
+
     生成评论的 label 恒为 1，真实基线 label 恒为 0——这是"构造即标签"，不是模型预测。
     """
     frames: List[pd.DataFrame] = []
@@ -281,7 +384,7 @@ def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.Dat
             "若是全新版本的数据，请先在此处补充字段映射。"
         )
     real = real.assign(label=0, date=_parse_dates(real["date"]))
-    frames.append(_finalize(real, "fraudsquad_amazon", label_source="real_baseline"))
+    frames.append(_finalize(real, dataset_id, label_source="real_baseline"))
 
     total_gen = 0
     for model_name, gpath in generated.items():
@@ -291,15 +394,18 @@ def read_fraudsquad_amazon(real_csv: Path, generated: Dict[str, Path]) -> pd.Dat
         if missing:
             raise SchemaError(f"FraudSquad 生成集 {model_name} 缺少列 {sorted(missing)}；实际表头: {list(gen.columns)}")
         gen = gen.assign(label=1, date=_parse_dates(gen["date"]))
-        gen_frame = _finalize(gen, "fraudsquad_amazon", label_source="llm_generated")
-        logger.info("FraudSquad 生成集 %s: %d 条", model_name, len(gen_frame))
+        gen_frame = _finalize(gen, dataset_id, label_source="llm_generated")
+        logger.info("FraudSquad 生成集 %s: %d 条（%d 个账号）", model_name, len(gen_frame), gen_frame["user_id"].nunique())
         total_gen += len(gen_frame)
         frames.append(gen_frame)
 
     out = pd.concat(frames, ignore_index=True)
     # 重新编号，保证 review_id 在全数据集内唯一
-    out["review_id"] = [f"fraudsquad_amazon-{i:09d}" for i in range(len(out))]
-    logger.info("FraudSquad 合计 %d 条（真实 %d / 生成 %d）", len(out), len(out) - total_gen, total_gen)
+    out["review_id"] = [f"{dataset_id}-{i:09d}" for i in range(len(out))]
+    logger.info(
+        "FraudSquad %s 合计 %d 条（真实 %d / 生成 %d，模型 %s）",
+        dataset_id, len(out), len(out) - total_gen, total_gen, sorted(generated),
+    )
     return coerce_dtypes(out)
 
 

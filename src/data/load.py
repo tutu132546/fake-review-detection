@@ -2,9 +2,10 @@
 
 用法::
 
-    from data import load_dataset, load_all
-    yelpchi = load_dataset("yelpchi")             # 只读单个数据集
+    from data import load_dataset, load_all, load_accounts
+    yelpchi = load_dataset("yelpchi")             # 只读单个数据集（评论级）
     both    = load_all(["yelpchi", "yelpzip"])    # 同 schema 直接 concat
+    acc     = load_accounts("fraudsquad_llama3")  # 账号级视图
 
 约定：返回值一定是 `schema.CANONICAL_COLUMNS` 的列序，按 (date, review_id) 升序，
       只读不写。要改数据请改构建脚本后重跑，不要在内存里就地修补。
@@ -19,8 +20,8 @@ from typing import Iterable, Iterator, List, Optional, Sequence
 
 import pandas as pd
 
-from .paths import UNIFIED_DIR
-from .schema import CANONICAL_COLUMNS, DATASET_SPECS
+from .paths import ACCOUNTS_DIR, DERIVED_DIR, UNIFIED_DIR
+from .schema import ACCOUNT_COLUMNS, CANONICAL_COLUMNS, DATASET_SPECS
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +50,30 @@ def available_datasets() -> List[str]:
 
 
 def list_datasets() -> pd.DataFrame:
-    """列出数据集及其规模/标签分布，供队友一眼确认"我该读哪个"。"""
+    """列出数据集及其规模/标签分布，供队友一眼确认"我该读哪个"。
+
+    `role` 列区分用途：`paper` = 论文口径的独立数据集；`view` = 只作总览的合并视图
+    （不要拿去做对比实验）；`derived` = 自建派生集。
+    """
+    from .schema import PUBLIC_DATASETS, VIEW_ONLY_DATASETS
+
     manifest = read_manifest()
     rows = []
     for name, spec in DATASET_SPECS.items():
         path = UNIFIED_DIR / f"{name}.parquet"
         info = manifest.get("datasets", {}).get(name, {})
         stats = info.get("stats") or {}
+        if name in VIEW_ONLY_DATASETS:
+            role = "view"
+        elif name in PUBLIC_DATASETS:
+            role = "paper"
+        else:
+            role = "derived"
         rows.append(
             {
                 "dataset": name,
                 "display_name": spec.display_name,
+                "role": role,
                 "built": path.exists(),
                 "rows": stats.get("rows"),
                 "users": stats.get("users"),
@@ -127,3 +141,60 @@ def iter_reviews(name: str, *, batch_size: int = 100_000, with_text: bool = True
     pf = pq.ParquetFile(path)
     for batch in pf.iter_batches(batch_size=batch_size, columns=cols):
         yield batch.to_pandas()
+
+
+# --------------------------------------------------------------------------
+# 账号级视图
+# --------------------------------------------------------------------------
+
+def load_accounts(name: str) -> pd.DataFrame:
+    """读取账号级表（`build_unified_data.py accounts` 产出）。
+
+    列见 `schema.ACCOUNT_COLUMNS`。`account_label=1` 表示该账号是水军/被接管账号，
+    但不是"它所有评论都是假的"——账号级与评论级是两个任务，不要混用标签。
+    """
+    path = ACCOUNTS_DIR / f"{name}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{name} 的账号级表不存在：{path}\n"
+            "请先运行 `python src/build_unified_data.py accounts`（需先 build 评论级表）。"
+        )
+    df = pd.read_parquet(path)
+    return df[[c for c in ACCOUNT_COLUMNS if c in df.columns]]
+
+
+def list_accounts() -> pd.DataFrame:
+    """账号级表的规模与正例比例一览。"""
+    manifest = read_manifest()
+    rows = (manifest.get("accounts") or [])
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["dataset", "accounts", "positive_accounts"])
+
+
+# --------------------------------------------------------------------------
+# 派生视图（规模对齐子样本）
+# --------------------------------------------------------------------------
+
+def load_derived(view: str = "yelpzip_scale359k", seed: int = 0) -> pd.DataFrame:
+    """读取派生视图（`build_unified_data.py subsample` 产出）。
+
+    **它不是独立数据集**：只是 YelpZip 的一个规模对齐子样本，用于 YelpNYC 缺失时的
+    规模敏感性检查。用它跑稳健性实验时请遍历全部种子并报告均值与区间，
+    不要把单个种子的结果写进主对比表。
+    """
+    path = DERIVED_DIR / f"{view}_seed{seed}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"派生视图不存在：{path}\n请先运行 `python src/build_unified_data.py subsample`。"
+        )
+    return pd.read_parquet(path)
+
+
+def list_derived() -> pd.DataFrame:
+    """列出已生成的派生视图（每个种子一行）。"""
+    p = DERIVED_DIR / "manifest.json"
+    if not p.exists():
+        return pd.DataFrame(columns=["view", "seed", "rows", "items", "users", "fake_ratio"])
+    with open(p, "r", encoding="utf-8") as f:
+        m = json.load(f)
+    rows = [{"view": m["view"], **r} for r in m.get("runs", [])]
+    return pd.DataFrame(rows)
