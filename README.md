@@ -7,31 +7,83 @@
 ```
 fake-review-detection/
 ├── README.md              # 项目介绍、分工、运行说明
+├── data_dictionary.md     # 数据字典（含第十一节：多数据集统一格式）
 ├── requirements.txt
 ├── data/
 │   ├── raw/               # 原始数据（已加入 .gitignore，不提交到仓库）
-│   └── processed/         # 清洗/处理后的数据
+│   │   ├── yelpchi/       #   YelpChi metadata
+│   │   ├── yelpzip/       #   YelpZip 带文本 CSV
+│   │   ├── yelpnyc/       #   YelpNYC 官方包解出的 metadata + reviewContent
+│   │   └── fraudsquad/    #   FraudSquad-Amazon 真实基线与 LLM 生成集
+│   └── processed/
+│       ├── unified/       # 统一格式 parquet + manifest.json（构建产物）
+│       └── accounts/      # 账号级表（从评论级聚合）
+├── docs/
+│   └── data/provenance.md # 数据集来源、核验与使用条款
 ├── notebooks/             # 探索性分析，每人一个，命名如 01_eda_zhang.ipynb
 ├── src/
+│   ├── build_unified_data.py  # 数据管线入口（download / build / accounts / qa / verify）
+│   ├── data/              # 统一数据层：下载、解析、schema、加载
 │   ├── crawler/           # 爬虫
 │   ├── features/          # 特征工程
 │   ├── models/            # 各类检测模型
-│   └── viz/                # 可视化
-├── results/                # 图表、指标输出
-└── paper/                  # 论文（LaTeX / docx），含参考文献 .bib
+│   └── viz/               # 可视化
+├── results/               # 图表、指标输出
+├── tests/                 # 单元测试（不依赖真实数据）
+└── paper/                 # 论文（LaTeX / docx），含参考文献 .bib
 ```
 
 `data/raw/` 已写入 `.gitignore`，请勿提交大体积原始数据；数据集较大时把网盘链接贴在下方「数据集」部分。
 
 ## 数据集
 
-主线使用带标注的公开数据集做量化验证，附加实验再用自建爬虫数据做案例分析：
+公开数据 3 个来源 / 5 张论文口径表，加一份自建注入集，全部整理成同一套评论级格式
+（`user / item / rating / date / label / text`）。
 
-- **YelpChi**：Yelp 过滤器标注过的虚假评论数据集，学界标准 benchmark，带 label
-- **Amazon Review Fraud**（DGL 库自带）：带标注
-- 自建数据：豆瓣 / Steam（Steam 官方 API 相对友好，豆瓣反爬较凶，可作为 B 计划）
+| 数据集 | 规模 | 文本 | 标签来源 | 状态 |
+|---|---|---|---|---|
+| **YelpChi** | 67,395 条 / 38,063 用户 / 201 商户 | 无 | Yelp 过滤器 | 已构建 |
+| **YelpNYC** | 359,052 条 / 160,225 用户 / 923 商户（餐厅） | 有 | Yelp 过滤器 | 已构建 |
+| **YelpZip** | 608,458 条 / 260,239 用户 / 5,044 商户 | 有 | Yelp 过滤器 | 已构建 |
+| **FraudSquad-Llama3** | 89,247 条（生成 2,489） | 有 | 构造即真值 | 已构建 |
+| **FraudSquad-Qwen2** | 89,253 条（生成 2,495） | 有 | 构造即真值 | 已构建 |
+| **FraudSquad-Qwen-DSR1** | 89,258 条（生成 2,500） | 有 | 构造即真值 | 已构建 |
+| *FraudSquad（三模型合并视图）* | *94,242 条（生成 7,484）* | 有 | 构造即真值 | 已构建，**仅总览、不作对比基准** |
+| **YelpChi + 300 注入账号**（自建） | 70,186 条（注入 2,791） | 无 | 注入脚本 | 已构建 |
 
-原始数据网盘链接：`TODO`
+> **FraudSquad 为什么是三份**：论文里三个模型是三个独立数据集（真实基线 + 单一模型生成的假评论，
+> 每个被接管账号约 2 条假评论）。合并成一份后同一账号会攒到 4~6 条假评论，与原文数字无法对齐。
+
+主要文档（一页纸状态表在 [results/data_status.md](results/data_status.md)）：
+
+- 来源、核验过程与使用条款：**[docs/data/provenance.md](docs/data/provenance.md)**
+- 字段定义与账号级表：**[data_dictionary.md 第十一节](data_dictionary.md)**
+- 实测质量与使用陷阱：**[results/data_quality_report.md](results/data_quality_report.md)**
+- 数据现状一页纸、给下游的交接：**[results/data_status.md](results/data_status.md)**
+
+各数据集的引用要求：
+
+- YelpChi / YelpNYC / YelpZip：Rayana & Akoglu, *Collective Opinion Spam Detection*, KDD 2015
+  （YelpChi 还需引 Mukherjee et al., ICWSM 2013）
+- FraudSquad：Liu et al., *Detecting LLM-Generated Spam Reviews by Integrating Language Model
+  Embeddings and Graph Neural Network*, **2025**（arXiv 首版 2025-10，2026-04 修订；引用年份按首版写 2025）
+- FraudSquad 附带的 `QA.zip`：**不是 Yelp 数据**，是 Liu et al., WWW 2017
+  *Detecting Collusive Spamming Activities in Community Question Answering* 的中文问答社区（CQA）协同刷分数据，
+  本项目未用它建模
+
+**使用条款**：以上数据仅限学术研究，不得再分发或商用。原始文件已列入 `.gitignore`，
+仓库只保留下载脚本与校验值（sha256 写死在 `src/data/sources.py`）。
+
+> 关于 YelpNYC：官方发布页只提供邮件申请渠道（srayana@cs.stonybrook.edu），发信未获回复后，
+> 改从官方页 "here" 链接指向的**作者 Dropbox 共享目录**取得发布包
+> `15-collective_opinion_spam_detection.zip`，解出 `metadata` 与 `reviewContent` 两个文件放入
+> `data/raw/yelpnyc/`。**已构建 359,052 条、带完整文本**，与官方公布的
+> 359,052 / 160,225 用户 / 923 商户、10.27% 过滤评论、17.79% spammer **五项全部吻合**。
+> 两个文件靠 `(user, item, date)` 对齐，读取器会逐行验键，对不上就报错而不是静默贴错。
+> 细节见 [docs/data/provenance.md](docs/data/provenance.md) §2.2。
+>
+> 目前唯一的数据缺口是 **YelpChi 缺评论文本**（持的是 `metadata` 版本，无 `reviewContent`），
+> 影响面仅为「文本类方法不能在 YelpChi 上跑」，图方法与元数据方法不受影响。
 
 ## 分工
 
@@ -58,9 +110,46 @@ fake-review-detection/
 pip install -r requirements.txt
 ```
 
-`TODO`：补充数据准备、特征生成、模型训练/评估的具体运行步骤。
+### 第一步：准备统一格式的数据
 
-# 数据产物说明
+```bash
+python src/build_unified_data.py download   # 按清单下载（断点续传 + 多镜像回退 + sha256 校验）
+python src/build_unified_data.py build      # 解析 -> 校验 -> 写 parquet + manifest
+python src/build_unified_data.py accounts   # 从评论级聚合出账号级表
+python src/build_unified_data.py qa         # 生成 results/data_quality_report.md
+python src/build_unified_data.py verify     # 校验产物与 manifest 一致
+# 一条命令跑完
+python src/build_unified_data.py all
+```
+
+产物在 `data/processed/`（已 gitignore）：
+
+| 文件 | 内容 |
+|---|---|
+| `unified/yelpchi.parquet` / `yelpnyc.parquet` / `yelpzip.parquet` / `fraudsquad_{llama3,qwen2,qwen_dsr1}.parquet` / `yelpchi_injected.parquet` | 论文口径的 6 张评论级表 + 1 张自建注入表 |
+| `unified/fraudsquad_amazon.parquet` | 三模型合并**视图**，仅供总览，不进 `all_reviews` |
+| `unified/all_reviews.parquet` | 上述 7 张表合并（137 万条），带 `dataset` 列区分来源 |
+| `accounts/<dataset>.parquet` | 账号级表（8 份），含 `account_label` 与 `label_basis` |
+| `unified/manifest.json` | 构建时间、原始文件 sha256、各集统计、官方规模对照、文本对齐与残缺行审计 |
+
+下游读数据统一走 `src/data/load.py`：
+
+```python
+import sys; sys.path.insert(0, "src")
+from data import load_dataset, load_all, load_accounts, list_datasets
+
+print(list_datasets())                    # 哪些数据集已构建、规模多少、role 是 paper/view/self_built
+df = load_dataset("yelpzip")              # 单集
+df = load_dataset("yelpzip", with_text=False)   # 不要文本时省内存
+both = load_all(["yelpchi", "fraudsquad_amazon"])
+```
+
+统一表字段：`dataset, review_id, global_user_id, user_id, item_id, rating, date, label,
+label_source, is_injected, text_available, text`。其中 **`label=1` 恒表示虚假评论**，
+`label=0` 为真实评论；`global_user_id` 形如 `yelpzip:12345`，跨数据集拼接不会撞号。
+
+### 第二步：生成历史链路产物
+
 由于数据文件体积较大，Git 仓库中不包含 `data/processed/` 下的文件。请按以下顺序在本地运行脚本生成：
 1. `python src/step0_convert_metadata.py` -> 生成 `YelpChi_reviews.csv`
 2. `python src/step1_build_account_base.py` -> 生成 `clean_accounts.parquet` 和 `scaler_params.json`
